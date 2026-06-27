@@ -294,7 +294,7 @@ export default function ParentDashboard() {
   const [loadError, setLoadError] = useState<string | null>(null)
 
   // Comments (real, persisted via /api/comments)
-  interface CommentItem { _id: string; message: string; regarding?: string; status: string; createdAt: string }
+  interface CommentItem { _id: string; message: string; regarding?: string; status: string; reply?: string; repliedAt?: string; createdAt: string }
   const [commentText, setCommentText] = useState("")
   const [commentState, setCommentState] = useState<"idle" | "sending" | "sent" | "error">("idle")
   const [commentError, setCommentError] = useState("")
@@ -1036,6 +1036,12 @@ export default function ParentDashboard() {
                             {c.regarding && <span>·</span>}
                             <span>{new Date(c.createdAt).toLocaleString()}</span>
                           </div>
+                          {c.reply && (
+                            <div className="mt-3 bg-rose-50 border border-rose-200 rounded-lg px-4 py-3">
+                              <p className="text-xs font-semibold text-rose-700 mb-1">School replied · {c.repliedAt ? new Date(c.repliedAt).toLocaleString() : ""}</p>
+                              <p className="text-sm text-rose-900 whitespace-pre-wrap">{c.reply}</p>
+                            </div>
+                          )}
                         </li>
                       ))}
                     </ul>

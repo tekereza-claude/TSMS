@@ -207,6 +207,10 @@ function validateAndParseCSV(
 
   const idx = (col: string) => headers.indexOf(col)
 
+  // Build case-insensitive lookup maps so e.g. "computer science" matches "Computer Science"
+  const studentNameMap = new Map(validStudentNames.map((n) => [n.toLowerCase(), n]))
+  const subjectMap = new Map(validSubjects.map((s) => [s.toLowerCase(), s]))
+
   const rows: ParsedRow[] = []
   const seen = new Set<string>()
 
@@ -214,25 +218,29 @@ function validateAndParseCSV(
     const cols = lines[i].split(",").map((c) => c.trim())
     const errors: string[] = []
 
-    const studentName = cols[idx("student name")] || ""
-    const subject = cols[idx("subject")] || ""
+    const studentNameRaw = cols[idx("student name")] || ""
+    const subjectRaw = cols[idx("subject")] || ""
     const testRaw = cols[idx("test")] || ""
     const examRaw = cols[idx("exam")] || ""
     const term = cols[idx("term")] || ""
     const year = cols[idx("year")] || ""
 
+    // Resolve to canonical casing from DB
+    const studentName = studentNameMap.get(studentNameRaw.toLowerCase()) ?? studentNameRaw
+    const subject = subjectMap.get(subjectRaw.toLowerCase()) ?? subjectRaw
+
     // Student must exist in class
-    if (!studentName) {
+    if (!studentNameRaw) {
       errors.push("Student name is required")
-    } else if (!validStudentNames.includes(studentName)) {
-      errors.push(`"${studentName}" is not enrolled in this class`)
+    } else if (!studentNameMap.has(studentNameRaw.toLowerCase())) {
+      errors.push(`"${studentNameRaw}" is not enrolled in this class`)
     }
 
     // Subject must be valid
-    if (!subject) {
+    if (!subjectRaw) {
       errors.push("Subject is required")
-    } else if (!validSubjects.includes(subject)) {
-      errors.push(`"${subject}" is not a recognised subject`)
+    } else if (!subjectMap.has(subjectRaw.toLowerCase())) {
+      errors.push(`"${subjectRaw}" is not a recognised subject. Available: ${validSubjects.join(", ")}`)
     }
 
     // Test must be a number within 0–TEST_MAX
@@ -251,10 +259,11 @@ function validateAndParseCSV(
       errors.push(`Exam must be between 0 and ${EXAM_MAX}`)
     }
 
-    // Term must be valid
+    // Term must be valid (case-insensitive)
+    const termNormalised = VALID_TERMS.find((t) => t.toLowerCase() === term.toLowerCase()) ?? term
     if (!term) {
       errors.push("Term is required")
-    } else if (!VALID_TERMS.includes(term)) {
+    } else if (!VALID_TERMS.find((t) => t.toLowerCase() === term.toLowerCase())) {
       errors.push(`Term must be one of: ${VALID_TERMS.join(", ")}`)
     }
 
@@ -264,9 +273,9 @@ function validateAndParseCSV(
     }
 
     // Duplicate check: same student + subject + term + year
-    const key = `${studentName}|${subject}|${term}|${year}`
+    const key = `${studentName}|${subject}|${termNormalised}|${year}`
     if (seen.has(key)) {
-      errors.push(`Duplicate entry for ${studentName} - ${subject} (${term} ${year})`)
+      errors.push(`Duplicate entry for ${studentName} - ${subject} (${termNormalised} ${year})`)
     } else {
       seen.add(key)
     }
@@ -276,7 +285,7 @@ function validateAndParseCSV(
       subject,
       test: isNaN(test) ? 0 : test,
       exam: isNaN(exam) ? 0 : exam,
-      term,
+      term: termNormalised,
       year,
       valid: errors.length === 0,
       errors,
@@ -822,8 +831,8 @@ export default function TeacherDashboard() {
                       <ul className="text-sm text-indigo-800 space-y-1 list-disc list-inside">
                         <li>File must be <span className="font-medium">.csv</span> format (export from Excel as CSV)</li>
                         <li>Required columns: <span className="font-mono text-xs bg-indigo-100 px-1 rounded">Student Name, Subject, Test, Exam, Term, Year</span></li>
-                        <li>Student names must exactly match enrolled students</li>
-                        <li>Subject names must match registered subjects</li>
+                        <li>Student names must match enrolled students (case-insensitive)</li>
+                        <li>Subject names must match registered subjects (case-insensitive)</li>
                         <li>Term must be: <span className="font-medium">Term 1, Term 2</span> or <span className="font-medium">Term 3</span></li>
                         <li><span className="font-medium">Test</span> is out of {TEST_MAX} and <span className="font-medium">Exam</span> is out of {EXAM_MAX} (total {TEST_MAX + EXAM_MAX})</li>
                         <li>No duplicate entries (same student + subject + term + year)</li>

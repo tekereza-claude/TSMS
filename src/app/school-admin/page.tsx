@@ -16,6 +16,9 @@ import {
   BanknotesIcon,
   TrashIcon,
   ExclamationTriangleIcon,
+  HomeModernIcon,
+  ChatBubbleLeftRightIcon,
+  EnvelopeOpenIcon,
 } from "@heroicons/react/24/outline"
 import LanguageToggle from "@/components/LanguageToggle"
 
@@ -158,7 +161,32 @@ function normalizeSubject(s: RawSubject): Subject {
   }
 }
 
-type Section = "overview" | "teachers" | "students" | "classes" | "subjects" | "fees"
+interface Parent {
+  id: string
+  name: string
+  email: string
+  students: { id: string; firstName: string; lastName: string }[]
+  joinedDate: string
+}
+
+interface RawParent {
+  _id: string
+  userId: RawUser | null
+  studentIds: { _id: string; firstName: string; lastName: string }[]
+  createdAt?: string
+}
+
+function normalizeParent(p: RawParent): Parent {
+  return {
+    id: String(p._id),
+    name: p.userId?.name ?? "Unknown",
+    email: p.userId?.email ?? "",
+    students: (p.studentIds ?? []).map((s) => ({ id: String(s._id), firstName: s.firstName, lastName: s.lastName })),
+    joinedDate: shortDate(p.userId?.createdAt ?? p.createdAt),
+  }
+}
+
+type Section = "overview" | "teachers" | "students" | "classes" | "subjects" | "fees" | "parents" | "messages"
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
@@ -187,6 +215,21 @@ export default function SchoolAdminDashboard() {
   const [students, setStudents] = useState<Student[]>([])
   const [classes, setClasses] = useState<Class[]>([])
   const [subjects, setSubjects] = useState<Subject[]>([])
+  interface MessageItem {
+    _id: string
+    message: string
+    regarding?: string
+    status: "SENT" | "READ"
+    reply?: string
+    repliedAt?: string
+    createdAt: string
+    parentId?: { userId?: { name?: string; email?: string } }
+  }
+  const [parents, setParents] = useState<Parent[]>([])
+  const [messages, setMessages] = useState<MessageItem[]>([])
+  const [messagesLoading, setMessagesLoading] = useState(false)
+  const [replyText, setReplyText] = useState<Record<string, string>>({})
+  const [replySending, setReplySending] = useState<Record<string, boolean>>({})
   const [dataLoading, setDataLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
 
@@ -208,11 +251,12 @@ export default function SchoolAdminDashboard() {
     setDataLoading(true)
     setLoadError(null)
     try {
-      const [tt, ss, cc, su] = await Promise.all([
+      const [tt, ss, cc, su, pp] = await Promise.all([
         fetchJson("/api/teachers"),
         fetchJson("/api/students"),
         fetchJson("/api/classes"),
         fetchJson("/api/subjects"),
+        fetchJson("/api/parents"),
       ])
       const teacherDocs = (tt as RawTeacher[]).map(normalizeTeacher)
       const nameById = new Map(teacherDocs.map((t) => [t.id, t.name]))
@@ -221,6 +265,7 @@ export default function SchoolAdminDashboard() {
       setStudents((ss as RawStudent[]).map(normalizeStudent))
       setClasses((cc as RawClass[]).map((c) => normalizeClass(c, teacherName)))
       setSubjects((su as RawSubject[]).map(normalizeSubject))
+      setParents((pp as RawParent[]).map(normalizeParent))
     } catch (e) {
       setLoadError(e instanceof Error ? e.message : "Failed to load data")
     } finally {
@@ -335,12 +380,13 @@ export default function SchoolAdminDashboard() {
   }
 
   const endpointFor = (s: Section) =>
-    s === "teachers" ? "/api/teachers" : s === "students" ? "/api/students" : s === "classes" ? "/api/classes" : "/api/subjects"
+    s === "teachers" ? "/api/teachers" : s === "students" ? "/api/students" : s === "classes" ? "/api/classes" : s === "parents" ? "/api/parents" : "/api/subjects"
 
   const buildBody = (s: Section, avatar: string) => {
     if (s === "teachers") return { name: form.name, email: form.email, password: form.password }
     if (s === "students") return { firstName: form.firstName, lastName: form.lastName, email: form.email || undefined, classId: form.classId || undefined, profilePicture: avatar || undefined }
     if (s === "classes") return { name: form.name, grade: form.grade, teacherId: form.teacherId || undefined }
+    if (s === "parents") return { name: form.name, email: form.email, password: form.password, studentId: form.studentId || undefined }
     return { name: form.name, code: form.code, teacherId: form.teacherId || undefined }
   }
 
@@ -405,6 +451,50 @@ export default function SchoolAdminDashboard() {
     }
   }
 
+  const unreadCount = messages.filter((m) => m.status === "SENT").length
+
+  const loadMessages = useCallback(async () => {
+    setMessagesLoading(true)
+    try {
+      const data = await fetchJson("/api/comments")
+      setMessages(Array.isArray(data) ? data : [])
+    } catch {
+      // silently fail — messages are non-critical
+    } finally {
+      setMessagesLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (activeSection === "messages" && status === "authenticated") loadMessages()
+  }, [activeSection, status, loadMessages])
+
+  const markAsRead = async (id: string) => {
+    try {
+      await fetch(`/api/comments/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({}) })
+      setMessages((prev) => prev.map((m) => m._id === id ? { ...m, status: "READ" } : m))
+    } catch { /* ignore */ }
+  }
+
+  const sendReply = async (id: string) => {
+    const reply = replyText[id]?.trim()
+    if (!reply) return
+    setReplySending((prev) => ({ ...prev, [id]: true }))
+    try {
+      const res = await fetch(`/api/comments/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reply }),
+      })
+      if (!res.ok) return
+      const updated = await res.json()
+      setMessages((prev) => prev.map((m) => m._id === id ? { ...m, ...updated } : m))
+      setReplyText((prev) => ({ ...prev, [id]: "" }))
+    } catch { /* ignore */ } finally {
+      setReplySending((prev) => ({ ...prev, [id]: false }))
+    }
+  }
+
   const menuItems = [
     { id: "overview", label: "Overview", icon: ChartBarIcon },
     { id: "teachers", label: "Teachers", icon: UserGroupIcon },
@@ -412,6 +502,8 @@ export default function SchoolAdminDashboard() {
     { id: "classes", label: "Classes", icon: RectangleGroupIcon },
     { id: "subjects", label: "Subjects", icon: BookOpenIcon },
     { id: "fees", label: "Fees", icon: BanknotesIcon },
+    { id: "parents", label: "Parents", icon: HomeModernIcon },
+    { id: "messages", label: "Messages", icon: ChatBubbleLeftRightIcon, badge: unreadCount },
   ] as const
 
   const q = search.toLowerCase()
@@ -419,6 +511,7 @@ export default function SchoolAdminDashboard() {
   const filteredStudents = students.filter((s) => `${s.firstName} ${s.lastName}`.toLowerCase().includes(q) || (s.email || "").toLowerCase().includes(q))
   const filteredClasses = classes.filter((c) => c.name.toLowerCase().includes(q) || c.grade.toLowerCase().includes(q))
   const filteredSubjects = subjects.filter((s) => s.name.toLowerCase().includes(q) || s.code.toLowerCase().includes(q))
+  const filteredParents = parents.filter((p) => p.name.toLowerCase().includes(q) || p.email.toLowerCase().includes(q))
 
   if (status === "loading") {
     return (
@@ -428,7 +521,7 @@ export default function SchoolAdminDashboard() {
     )
   }
 
-  const sectionNoun = activeSection === "teachers" ? "Teacher" : activeSection === "students" ? "Student" : activeSection === "classes" ? "Class" : "Subject"
+  const sectionNoun = activeSection === "teachers" ? "Teacher" : activeSection === "students" ? "Student" : activeSection === "classes" ? "Class" : activeSection === "parents" ? "Parent" : "Subject"
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -467,7 +560,7 @@ export default function SchoolAdminDashboard() {
                 return (
                   <button
                     key={item.id}
-                    onClick={() => { setActiveSection(item.id); setSearch("") }}
+                    onClick={() => { setActiveSection(item.id as Section); setSearch("") }}
                     className={`group flex w-full items-center px-3 py-2 text-sm font-medium rounded-lg transition-colors ${
                       activeSection === item.id
                         ? "bg-white text-green-600"
@@ -476,6 +569,11 @@ export default function SchoolAdminDashboard() {
                   >
                     <Icon className="mr-3 h-5 w-5" />
                     {item.label}
+                    {"badge" in item && item.badge > 0 && (
+                      <span className="ml-auto bg-white text-green-700 text-xs font-bold px-1.5 py-0.5 rounded-full">
+                        {item.badge}
+                      </span>
+                    )}
                   </button>
                 )
               })}
@@ -835,6 +933,177 @@ export default function SchoolAdminDashboard() {
               </div>
             )}
 
+            {/* ── Parents ── */}
+            {activeSection === "parents" && (
+              <div className="space-y-6">
+                <div className="flex justify-between items-center">
+                  <h3 className="text-2xl font-bold text-gray-900">Parents</h3>
+                  <button onClick={openAdd} className="inline-flex items-center px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors">
+                    <PlusIcon className="h-5 w-5 mr-2" /> Add Parent
+                  </button>
+                </div>
+
+                <div className="bg-white rounded-lg shadow p-4">
+                  <div className="relative">
+                    <MagnifyingGlassIcon className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-400" />
+                    <input type="text" placeholder="Search parents..." value={search} onChange={(e) => setSearch(e.target.value)}
+                      className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500" />
+                  </div>
+                </div>
+
+                <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+                  <div className="overflow-x-auto">
+                    <table className="min-w-full">
+                      <thead>
+                        <tr className="border-b border-gray-200 bg-gray-50">
+                          <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Parent</th>
+                          <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Linked Students</th>
+                          <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Joined</th>
+                          <th className="px-6 py-3 text-right text-xs font-semibold text-gray-600 uppercase tracking-wider">Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-100">
+                        {filteredParents.map((p) => (
+                          <tr key={p.id} className="hover:bg-gray-50 transition-colors">
+                            <td className="px-6 py-4">
+                              <div className="flex items-center">
+                                <div className="h-10 w-10 rounded-full bg-purple-100 flex items-center justify-center">
+                                  <span className="text-sm font-medium text-purple-600">{p.name.charAt(0)}</span>
+                                </div>
+                                <div className="ml-3">
+                                  <p className="text-sm font-medium text-gray-900">{p.name}</p>
+                                  <p className="text-xs text-gray-500">{p.email}</p>
+                                </div>
+                              </div>
+                            </td>
+                            <td className="px-6 py-4">
+                              <div className="flex flex-wrap gap-1">
+                                {p.students.length ? p.students.map((s) => (
+                                  <span key={s.id} className="inline-flex px-2 py-0.5 text-xs rounded-full bg-green-100 text-green-800">{s.firstName} {s.lastName}</span>
+                                )) : <span className="text-xs text-gray-400">None</span>}
+                              </div>
+                            </td>
+                            <td className="px-6 py-4 text-sm text-gray-500">{p.joinedDate}</td>
+                            <td className="px-6 py-4 text-right">
+                              <button onClick={() => removeItem("parents", p.id, p.name)} className="px-3 py-1 text-xs font-medium text-red-600 bg-red-50 rounded-md hover:bg-red-100 transition-colors">Remove</button>
+                            </td>
+                          </tr>
+                        ))}
+                        {filteredParents.length === 0 && (
+                          <tr><td colSpan={4} className="px-6 py-8 text-center text-sm text-gray-400">No parents found.</td></tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* ── Messages ── */}
+            {activeSection === "messages" && (
+              <div className="space-y-6">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h3 className="text-2xl font-bold text-gray-900">Parent Messages</h3>
+                    {unreadCount > 0 && (
+                      <p className="text-sm text-gray-500 mt-0.5">{unreadCount} unread message{unreadCount > 1 ? "s" : ""}</p>
+                    )}
+                  </div>
+                  <button onClick={loadMessages} className="text-sm text-green-600 hover:underline">Refresh</button>
+                </div>
+
+                {messagesLoading ? (
+                  <div className="flex justify-center py-16">
+                    <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-green-600" />
+                  </div>
+                ) : messages.length === 0 ? (
+                  <div className="bg-white rounded-xl shadow-sm border border-gray-200 text-center py-16">
+                    <ChatBubbleLeftRightIcon className="h-12 w-12 text-gray-300 mx-auto mb-3" />
+                    <p className="text-gray-500">No messages from parents yet.</p>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {messages.map((msg) => {
+                      const isUnread = msg.status === "SENT"
+                      const parentName = msg.parentId?.userId?.name ?? "Unknown Parent"
+                      const parentEmail = msg.parentId?.userId?.email ?? ""
+                      return (
+                        <div
+                          key={msg._id}
+                          className={`bg-white rounded-xl border p-5 transition-colors ${
+                            isUnread ? "border-green-300 shadow-sm" : "border-gray-200"
+                          }`}
+                        >
+                          <div className="flex items-start justify-between gap-4">
+                            <div className="flex items-start space-x-3 min-w-0">
+                              <div className="h-9 w-9 rounded-full bg-purple-100 flex items-center justify-center flex-shrink-0">
+                                <span className="text-sm font-semibold text-purple-600">{parentName.charAt(0)}</span>
+                              </div>
+                              <div className="min-w-0">
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  <p className="text-sm font-semibold text-gray-900">{parentName}</p>
+                                  {parentEmail && <p className="text-xs text-gray-400">{parentEmail}</p>}
+                                  {isUnread && (
+                                    <span className="text-xs font-semibold text-white bg-green-600 px-2 py-0.5 rounded-full">New</span>
+                                  )}
+                                </div>
+                                {msg.regarding && (
+                                  <p className="text-xs text-gray-500 mt-0.5">Re: {msg.regarding}</p>
+                                )}
+                                <p className="text-sm text-gray-700 mt-2 whitespace-pre-wrap">{msg.message}</p>
+                                <p className="text-xs text-gray-400 mt-2">{new Date(msg.createdAt).toLocaleString()}</p>
+                              </div>
+                            </div>
+                            {isUnread ? (
+                              <button
+                                onClick={() => markAsRead(msg._id)}
+                                className="flex-shrink-0 inline-flex items-center px-3 py-1.5 text-xs font-medium text-green-700 bg-green-50 rounded-lg hover:bg-green-100 transition-colors"
+                              >
+                                <EnvelopeOpenIcon className="h-4 w-4 mr-1" />
+                                Mark as read
+                              </button>
+                            ) : (
+                              <span className="flex-shrink-0 text-xs text-gray-400 flex items-center gap-1">
+                                <EnvelopeOpenIcon className="h-4 w-4" /> Read
+                              </span>
+                            )}
+                          </div>
+
+                          {/* Existing reply */}
+                          {msg.reply && (
+                            <div className="mt-3 ml-12 bg-green-50 border border-green-200 rounded-lg px-4 py-3">
+                              <p className="text-xs font-semibold text-green-700 mb-1">Your reply · {msg.repliedAt ? new Date(msg.repliedAt).toLocaleString() : ""}</p>
+                              <p className="text-sm text-green-900 whitespace-pre-wrap">{msg.reply}</p>
+                            </div>
+                          )}
+
+                          {/* Reply box */}
+                          {!msg.reply && (
+                            <div className="mt-3 ml-12 flex gap-2 items-end">
+                              <textarea
+                                rows={2}
+                                value={replyText[msg._id] ?? ""}
+                                onChange={(e) => setReplyText((prev) => ({ ...prev, [msg._id]: e.target.value }))}
+                                placeholder="Write a reply to this parent…"
+                                className="flex-1 text-sm rounded-lg border border-gray-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-green-500 resize-none"
+                              />
+                              <button
+                                onClick={() => sendReply(msg._id)}
+                                disabled={!replyText[msg._id]?.trim() || replySending[msg._id]}
+                                className="flex-shrink-0 px-4 py-2 text-xs font-medium text-white bg-green-600 rounded-lg hover:bg-green-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                              >
+                                {replySending[msg._id] ? "Sending…" : "Reply"}
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* ── Fees ── */}
             {activeSection === "fees" && (
               <div className="space-y-6">
@@ -950,20 +1219,29 @@ export default function SchoolAdminDashboard() {
             </div>
 
             <form className="space-y-4" onSubmit={submitAdd}>
-              {activeSection === "teachers" && (
+              {(activeSection === "teachers" || activeSection === "parents") && (
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Full Name *</label>
-                    <input type="text" required value={form.name || ""} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500" placeholder="Alice Johnson" />
+                    <input type="text" required value={form.name || ""} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500" placeholder={activeSection === "parents" ? "Jane Doe" : "Alice Johnson"} />
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Email *</label>
-                    <input type="email" required value={form.email || ""} onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500" placeholder="teacher@school.edu" />
+                    <input type="email" required value={form.email || ""} onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500" placeholder={activeSection === "parents" ? "parent@email.com" : "teacher@school.edu"} />
                   </div>
                   <div className="col-span-2">
                     <label className="block text-sm font-medium text-gray-700 mb-1">Password *</label>
                     <input type="password" required value={form.password || ""} onChange={(e) => setForm((f) => ({ ...f, password: e.target.value }))} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500" placeholder="••••••••" />
                   </div>
+                  {activeSection === "parents" && (
+                    <div className="col-span-2">
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Link to Student <span className="text-gray-400 font-normal">(optional)</span></label>
+                      <select value={form.studentId || ""} onChange={(e) => setForm((f) => ({ ...f, studentId: e.target.value }))} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500">
+                        <option value="">Select student</option>
+                        {students.map((s) => <option key={s.id} value={s.id}>{s.firstName} {s.lastName}</option>)}
+                      </select>
+                    </div>
+                  )}
                 </div>
               )}
 
