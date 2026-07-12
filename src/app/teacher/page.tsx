@@ -183,13 +183,25 @@ function normalizeMark(m: RawMark): Mark {
 
 const VALID_TERMS = ["Term 1", "Term 2", "Term 3"]
 
+// Strip characters that look invisible/identical in a spreadsheet but break exact
+// matching: BOM, zero-width spaces, and non-breaking spaces (collapsed to a regular space).
+function cleanCell(s: string): string {
+  return s
+    .replace(/[\u200B-\u200D\uFEFF]/g, "")
+    .replace(/\u00A0/g, " ")
+    .trim()
+}
+
 function validateAndParseCSV(
   text: string,
   validStudentNames: string[],
   validSubjects: string[],
 ): { rows: ParsedRow[]; globalErrors: string[] } {
   const globalErrors: string[] = []
-  const lines = text.trim().split("\n").map((l) => l.trim()).filter(Boolean)
+  // Normalise line endings (Excel on Windows saves CRLF) and strip a leading BOM,
+  // which Excel adds when re-saving a downloaded CSV as UTF-8.
+  const normalised = text.replace(/^\uFEFF/, "").replace(/\r\n?/g, "\n")
+  const lines = normalised.trim().split("\n").map((l) => l.trim()).filter(Boolean)
 
   if (lines.length < 2) {
     globalErrors.push("File is empty or missing data rows.")
@@ -197,7 +209,7 @@ function validateAndParseCSV(
   }
 
   // Validate headers
-  const headers = lines[0].split(",").map((h) => h.trim().toLowerCase())
+  const headers = lines[0].split(",").map((h) => cleanCell(h).toLowerCase())
   const required = ["student name", "subject", "test", "exam", "term", "year"]
   const missing = required.filter((r) => !headers.includes(r))
   if (missing.length > 0) {
@@ -215,7 +227,7 @@ function validateAndParseCSV(
   const seen = new Set<string>()
 
   for (let i = 1; i < lines.length; i++) {
-    const cols = lines[i].split(",").map((c) => c.trim())
+    const cols = lines[i].split(",").map((c) => cleanCell(c))
     const errors: string[] = []
 
     const studentNameRaw = cols[idx("student name")] || ""
@@ -315,6 +327,13 @@ export default function TeacherDashboard() {
   const [savedCount, setSavedCount] = useState(0)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
+  // Template builder selections — the downloaded template is pre-filled with
+  // every enrolled student's name plus these fixed values, so the teacher only
+  // ever has to type in Test/Exam numbers (never free-type a name or subject).
+  const [templateSubjectId, setTemplateSubjectId] = useState("")
+  const [templateTerm, setTemplateTerm] = useState("Term 1")
+  const [templateYear, setTemplateYear] = useState(String(new Date().getFullYear()))
+
   // Data loaded from the API
   const [students, setStudents] = useState<Student[]>([])
   const [subjects, setSubjects] = useState<Subject[]>([])
@@ -359,6 +378,11 @@ export default function TeacherDashboard() {
   useEffect(() => {
     if (status === "authenticated" && session?.user.role === "TEACHER") loadData()
   }, [status, session?.user.role, loadData])
+
+  // Default the template subject to the first one available once subjects load
+  useEffect(() => {
+    if (!templateSubjectId && subjects.length > 0) setTemplateSubjectId(subjects[0].id)
+  }, [subjects, templateSubjectId])
 
   const menuItems = [
     { id: "overview", label: "Overview", icon: ChartBarIcon },
@@ -411,11 +435,18 @@ export default function TeacherDashboard() {
   const classNames = [...new Set(students.map((s) => s.className).filter((c): c is string => Boolean(c)))]
   const classLabel = classNames.length === 1 ? classNames[0] : classNames.length > 1 ? "All Classes" : "My Class"
 
-  const exampleStudent = students[0] ? `${students[0].firstName} ${students[0].lastName}` : "Student Name"
-  const exampleSubject = subjects[0]?.name ?? "Subject"
+  // The downloaded template is pre-filled with every enrolled student's name
+  // (already spelled exactly right) plus the chosen subject/term/year, so the
+  // teacher only ever has to fill in the Test and Exam columns.
+  const templateSubjectName = subjects.find((s) => s.id === templateSubjectId)?.name ?? ""
+  const csvEscape = (value: string) => (/[,"\n]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value)
+  const templateRows = students.map((s) =>
+    [csvEscape(`${s.firstName} ${s.lastName}`), csvEscape(templateSubjectName), "", "", templateTerm, templateYear].join(",")
+  )
   const templateHref = `data:text/csv;charset=utf-8,${encodeURIComponent(
-    `Student Name,Subject,Test,Exam,Term,Year\n${exampleStudent},${exampleSubject},35,48,Term 1,2025`,
+    ["Student Name,Subject,Test,Exam,Term,Year", ...templateRows].join("\n"),
   )}`
+  const templateReady = templateSubjectName !== "" && students.length > 0
 
   const filteredStudents = students.filter((s) => {
     const q = search.toLowerCase()
@@ -824,27 +855,64 @@ export default function TeacherDashboard() {
                 <h3 className="text-2xl font-bold text-gray-900">Upload Marks</h3>
 
                 {/* Template download + instructions */}
-                <div className="bg-indigo-50 border border-indigo-200 rounded-lg p-6">
-                  <div className="flex items-start justify-between">
+                <div className="bg-indigo-50 border border-indigo-200 rounded-lg p-6 space-y-4">
+                  <div>
+                    <h4 className="text-sm font-semibold text-indigo-900 mb-1">Before you upload</h4>
+                    <ul className="text-sm text-indigo-800 space-y-1 list-disc list-inside">
+                      <li>The template is pre-filled with every student in your class and the subject/term/year picked below — just fill in <span className="font-medium">Test</span> and <span className="font-medium">Exam</span> for each row</li>
+                      <li>File must be <span className="font-medium">.csv</span> format (export from Excel as CSV)</li>
+                      <li>Required columns: <span className="font-mono text-xs bg-indigo-100 px-1 rounded">Student Name, Subject, Test, Exam, Term, Year</span></li>
+                      <li>Don&apos;t rename students or subjects in the file — they must match exactly what&apos;s registered (case-insensitive)</li>
+                      <li><span className="font-medium">Test</span> is out of {TEST_MAX} and <span className="font-medium">Exam</span> is out of {EXAM_MAX} (total {TEST_MAX + EXAM_MAX})</li>
+                      <li>No duplicate entries (same student + subject + term + year)</li>
+                    </ul>
+                  </div>
+
+                  <div className="flex flex-wrap items-end gap-3 pt-3 border-t border-indigo-200">
                     <div>
-                      <h4 className="text-sm font-semibold text-indigo-900 mb-1">Before you upload</h4>
-                      <ul className="text-sm text-indigo-800 space-y-1 list-disc list-inside">
-                        <li>File must be <span className="font-medium">.csv</span> format (export from Excel as CSV)</li>
-                        <li>Required columns: <span className="font-mono text-xs bg-indigo-100 px-1 rounded">Student Name, Subject, Test, Exam, Term, Year</span></li>
-                        <li>Student names must match enrolled students (case-insensitive)</li>
-                        <li>Subject names must match registered subjects (case-insensitive)</li>
-                        <li>Term must be: <span className="font-medium">Term 1, Term 2</span> or <span className="font-medium">Term 3</span></li>
-                        <li><span className="font-medium">Test</span> is out of {TEST_MAX} and <span className="font-medium">Exam</span> is out of {EXAM_MAX} (total {TEST_MAX + EXAM_MAX})</li>
-                        <li>No duplicate entries (same student + subject + term + year)</li>
-                      </ul>
+                      <label className="block text-xs font-medium text-indigo-900 mb-1">Subject</label>
+                      <select
+                        value={templateSubjectId}
+                        onChange={(e) => setTemplateSubjectId(e.target.value)}
+                        className="rounded-lg border border-indigo-300 bg-white px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                      >
+                        {subjects.length === 0 && <option value="">No subjects assigned</option>}
+                        {subjects.map((s) => (
+                          <option key={s.id} value={s.id}>{s.name}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-indigo-900 mb-1">Term</label>
+                      <select
+                        value={templateTerm}
+                        onChange={(e) => setTemplateTerm(e.target.value)}
+                        className="rounded-lg border border-indigo-300 bg-white px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                      >
+                        {VALID_TERMS.map((t) => (
+                          <option key={t} value={t}>{t}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-indigo-900 mb-1">Year</label>
+                      <input
+                        type="number"
+                        value={templateYear}
+                        onChange={(e) => setTemplateYear(e.target.value)}
+                        className="w-24 rounded-lg border border-indigo-300 bg-white px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                      />
                     </div>
                     <a
-                      href={templateHref}
-                      download="marks_template.csv"
-                      className="ml-4 flex-shrink-0 inline-flex items-center px-4 py-2 bg-indigo-600 text-white text-sm rounded-lg hover:bg-indigo-700 transition-colors"
+                      href={templateReady ? templateHref : undefined}
+                      download={templateReady ? "marks_template.csv" : undefined}
+                      aria-disabled={!templateReady}
+                      className={`inline-flex items-center px-4 py-2 text-white text-sm rounded-lg transition-colors ${
+                        templateReady ? "bg-indigo-600 hover:bg-indigo-700" : "bg-gray-300 cursor-not-allowed pointer-events-none"
+                      }`}
                     >
                       <DocumentArrowDownIcon className="h-4 w-4 mr-2" />
-                      Download Template
+                      Download Template ({students.length} student{students.length === 1 ? "" : "s"})
                     </a>
                   </div>
                 </div>

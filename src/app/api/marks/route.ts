@@ -4,6 +4,7 @@ import Mark, { TEST_MAX, EXAM_MAX } from "@/models/Mark"
 import Teacher from "@/models/Teacher"
 import Student from "@/models/Student"
 import Subject from "@/models/Subject"
+import Class from "@/models/Class"
 import Parent from "@/models/Parent"
 import { requireRole, ok, err } from "@/lib/api-helpers"
 import { UserRole } from "@/types"
@@ -20,19 +21,48 @@ export async function GET(req: NextRequest) {
   const term      = searchParams.get("term")
   const year      = searchParams.get("year")
 
-  // Parents can only query their own children
+  const filter: Record<string, unknown> = {}
+
   if (session!.user.role === UserRole.PARENT) {
+    // Parents can only query their own children
     if (!studentId) return err("studentId is required for parent queries", 400)
     const parent = await Parent.findOne({ userId: session!.user.id }).lean()
     if (!parent || !parent.studentIds.map(String).includes(studentId)) {
       return err("Forbidden", 403)
     }
+    filter.studentId = studentId
+  } else if (session!.user.role === UserRole.TEACHER) {
+    // Teachers can only see marks for students in the classes assigned to them
+    const teacher = await Teacher.findOne({ userId: session!.user.id }).select("_id").lean()
+    if (!teacher) return err("Teacher record not found", 404)
+    const classes = await Class.find({ teacherId: teacher._id }).select("_id").lean()
+    const allowedStudents = await Student.find({ classId: { $in: classes.map((c) => c._id) } })
+      .select("_id").lean()
+    const allowedIds = allowedStudents.map((s) => s._id.toString())
+    if (studentId) {
+      if (!allowedIds.includes(studentId)) return err("Forbidden", 403)
+      filter.studentId = studentId
+    } else {
+      filter.studentId = { $in: allowedIds }
+    }
+  } else if (session!.user.role === UserRole.SCHOOL_ADMIN) {
+    // School admins can only see marks for students in their own school
+    if (!session!.user.schoolId) return err("No school associated with this account", 400)
+    const schoolStudents = await Student.find({ schoolId: session!.user.schoolId }).select("_id").lean()
+    const allowedIds = schoolStudents.map((s) => s._id.toString())
+    if (studentId) {
+      if (!allowedIds.includes(studentId)) return err("Forbidden", 403)
+      filter.studentId = studentId
+    } else {
+      filter.studentId = { $in: allowedIds }
+    }
+  } else if (studentId) {
+    // SUPER_ADMIN may optionally filter by studentId with no further restriction
+    filter.studentId = studentId
   }
 
-  const filter: Record<string, unknown> = {}
-  if (studentId) filter.studentId = studentId
-  if (term)      filter.term      = term
-  if (year)      filter.year      = year
+  if (term) filter.term = term
+  if (year) filter.year = year
 
   const marks = await Mark.find(filter)
     .populate("studentId", "firstName lastName")
@@ -69,12 +99,15 @@ export async function POST(req: NextRequest) {
   const teacher = await Teacher.findOne({ userId: session!.user.id }).lean()
   if (!teacher) return err("Teacher record not found", 404)
 
-  // Validate all IDs belong to teacher's school
+  // A teacher may only submit marks for students in the classes assigned to them
+  const classes = await Class.find({ teacherId: teacher._id }).select("_id").lean()
+
   const studentIds = [...new Set(records.map((r) => r.studentId))]
   const subjectIds = [...new Set(records.map((r) => r.subjectId))]
 
   const [students, subjects] = await Promise.all([
-    Student.find({ _id: { $in: studentIds }, schoolId: teacher.schoolId }).select("_id").lean(),
+    Student.find({ _id: { $in: studentIds }, schoolId: teacher.schoolId, classId: { $in: classes.map((c) => c._id) } })
+      .select("_id").lean(),
     Subject.find({ _id: { $in: subjectIds }, schoolId: teacher.schoolId }).select("_id").lean(),
   ])
 
@@ -83,7 +116,7 @@ export async function POST(req: NextRequest) {
   const invalid = records.filter((r) => !validStudentIds.has(r.studentId) || !validSubjectIds.has(r.subjectId))
 
   if (invalid.length > 0) {
-    return err(`${invalid.length} record(s) reference students or subjects not in this school`, 422)
+    return err(`${invalid.length} record(s) reference students or subjects not assigned to you`, 422)
   }
 
   // Bulk upsert using updateOne with upsert:true. score = test + exam (out of 100).

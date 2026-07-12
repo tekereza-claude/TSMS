@@ -486,7 +486,7 @@ export default function ParentDashboard() {
               </div>
               <div className="ml-4">
                 <h1 className="text-xl font-semibold text-gray-900">Parent Portal</h1>
-                <p className="text-sm text-gray-500">Academic Progress Tracker</p>
+                <p className="text-sm text-gray-500">Welcome, {session?.user?.name ?? "Parent"}</p>
               </div>
             </div>
             <div className="flex items-center space-x-3">
@@ -593,7 +593,11 @@ export default function ParentDashboard() {
                   {activeSection === "messages" && "Messages to School"}
                   {activeSection === "careers" && "Career Insights"}
                 </h3>
-                <p className="text-sm text-gray-500 mt-0.5">{selectedChild.firstName} {selectedChild.lastName} · {selectedChild.class}</p>
+                <p className="text-sm text-gray-500 mt-0.5">
+                  {activeSection === "report"
+                    ? `${selectedChild.firstName} ${selectedChild.lastName} · ${selectedChild.class}`
+                    : selectedChild.class}
+                </p>
               </div>
               <div className="flex items-center space-x-2">
                 {TERMS.map((t) => (
@@ -880,7 +884,7 @@ export default function ParentDashboard() {
                   {disciplineRecords.length === 0 ? (
                     <div className="text-center py-12">
                       <ShieldExclamationIcon className="h-12 w-12 text-gray-300 mx-auto mb-3" />
-                      <p className="text-gray-500">No disciplinary records for {selectedChild.firstName}.</p>
+                      <p className="text-gray-500">No disciplinary records found.</p>
                     </div>
                   ) : (
                     <table className="min-w-full">
@@ -984,7 +988,7 @@ export default function ParentDashboard() {
                 <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
                   <h4 className="text-base font-semibold text-gray-900 mb-1">Send a message to the school</h4>
                   <p className="text-sm text-gray-500 mb-4">
-                    Share feedback, raise a concern, or ask a question regarding {selectedChild.firstName} {selectedChild.lastName}.
+                    Share feedback, raise a concern, or ask a question about your child.
                   </p>
                   <form onSubmit={submitComment}>
                     <textarea
@@ -1060,7 +1064,7 @@ export default function ParentDashboard() {
                     <LightBulbIcon className="h-14 w-14 text-gray-300 mx-auto mb-4" />
                     <h4 className="text-lg font-semibold text-gray-700 mb-2">Not enough data yet</h4>
                     <p className="text-sm text-gray-500 max-w-md mx-auto">
-                      Career insights will appear once {selectedChild.firstName} has marks recorded across multiple subjects.
+                      Career insights will appear once your child has marks recorded across multiple subjects.
                       Check back after the teacher uploads results.
                     </p>
                   </div>
@@ -1071,9 +1075,9 @@ export default function ParentDashboard() {
                       <div className="flex items-start space-x-4">
                         <LightBulbIcon className="h-10 w-10 flex-shrink-0 opacity-90" />
                         <div>
-                          <h4 className="text-lg font-bold mb-1">Career Insights for {selectedChild.firstName}</h4>
+                          <h4 className="text-lg font-bold mb-1">Career Insights for Your Child</h4>
                           <p className="text-rose-100 text-sm leading-relaxed">
-                            Based on {selectedChild.firstName}&apos;s academic performance across all subjects and terms,
+                            Based on your child&apos;s academic performance across all subjects and terms,
                             here are career paths worth exploring together. These are suggestions to spark conversation —
                             not a prescription.
                           </p>
@@ -1114,7 +1118,7 @@ export default function ParentDashboard() {
                     {/* Career recommendation cards */}
                     {careerRecs.length === 0 ? (
                       <div className="bg-white rounded-xl shadow p-8 text-center">
-                        <p className="text-gray-500 text-sm">No strong career matches found yet. Encourage {selectedChild.firstName} to keep improving across subjects.</p>
+                        <p className="text-gray-500 text-sm">No strong career matches found yet. Encourage your child to keep improving across subjects.</p>
                       </div>
                     ) : (
                       <>
@@ -1186,11 +1190,11 @@ export default function ParentDashboard() {
                               <p className="text-sm text-amber-800 leading-relaxed">
                                 {careerRecs[0] && (
                                   <>
-                                    {selectedChild.firstName} is showing real strength in{" "}
+                                    Your child is showing real strength in{" "}
                                     <span className="font-semibold">{careerRecs[0].topSubjects.slice(0, 2).join(" and ")}</span>.
                                     That&apos;s a great foundation for a career in{" "}
                                     <span className="font-semibold">{careerRecs[0].cluster.title}</span>.
-                                    Ask {selectedChild.firstName}: <em>&ldquo;What do you find most interesting about {careerRecs[0].topSubjects[0]}? Could you see yourself doing that every day?&rdquo;</em>
+                                    Ask your child: <em>&ldquo;What do you find most interesting about {careerRecs[0].topSubjects[0]}? Could you see yourself doing that every day?&rdquo;</em>
                                   </>
                                 )}
                               </p>

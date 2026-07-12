@@ -5,11 +5,13 @@ import { UserRole } from "@/types"
 import DisciplineRecord from "@/models/DisciplineRecord"
 import Teacher from "@/models/Teacher"
 import Student from "@/models/Student"
+import Class from "@/models/Class"
 import Parent from "@/models/Parent"
 
 // GET /api/discipline?studentId=...
 //  - PARENT       → records for their own child (studentId required)
-//  - TEACHER/ADMIN → records across their school (optionally filtered by studentId)
+//  - TEACHER      → records for students in the classes assigned to them (optionally filtered by studentId)
+//  - SCHOOL_ADMIN → records across their school (optionally filtered by studentId)
 //  - SUPER_ADMIN  → any
 export async function GET(req: NextRequest) {
   const { error, session } = await requireRole(
@@ -30,10 +32,21 @@ export async function GET(req: NextRequest) {
       return err("Forbidden", 403)
     }
     filter.studentId = studentId
-  } else if (
-    session!.user.role === UserRole.TEACHER ||
-    session!.user.role === UserRole.SCHOOL_ADMIN
-  ) {
+  } else if (session!.user.role === UserRole.TEACHER) {
+    // Teachers can only see records for students in the classes assigned to them
+    const teacher = await Teacher.findOne({ userId: session!.user.id }).select("_id").lean()
+    if (!teacher) return err("Teacher record not found", 404)
+    const classes = await Class.find({ teacherId: teacher._id }).select("_id").lean()
+    const allowedStudents = await Student.find({ classId: { $in: classes.map((c) => c._id) } })
+      .select("_id").lean()
+    const allowedIds = allowedStudents.map((s) => s._id.toString())
+    if (studentId) {
+      if (!allowedIds.includes(studentId)) return err("Forbidden", 403)
+      filter.studentId = studentId
+    } else {
+      filter.studentId = { $in: allowedIds }
+    }
+  } else if (session!.user.role === UserRole.SCHOOL_ADMIN) {
     if (!session!.user.schoolId) return err("No school associated with this account", 400)
     filter.schoolId = session!.user.schoolId
     if (studentId) filter.studentId = studentId
@@ -76,8 +89,14 @@ export async function POST(req: NextRequest) {
   const teacher = await Teacher.findOne({ userId: session!.user.id }).lean()
   if (!teacher) return err("Teacher record not found", 404)
 
-  const student = await Student.findOne({ _id: studentId, schoolId: teacher.schoolId }).select("_id").lean()
-  if (!student) return err("Student not found in this school", 404)
+  // A teacher may only record discipline for students in the classes assigned to them
+  const classes = await Class.find({ teacherId: teacher._id }).select("_id").lean()
+  const student = await Student.findOne({
+    _id: studentId,
+    schoolId: teacher.schoolId,
+    classId: { $in: classes.map((c) => c._id) },
+  }).select("_id").lean()
+  if (!student) return err("Student not found in your assigned classes", 404)
 
   // Store points signed by type so the sum reflects net conduct.
   const signedPoints = type === "Merit" ? Math.abs(points) : -Math.abs(points)
