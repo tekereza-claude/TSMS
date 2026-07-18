@@ -134,17 +134,6 @@ export default function SignIn() {
             </Link>
           </div>
         </form>
-
-        <div className="mt-6 border-t border-gray-200 pt-6">
-          <p className="text-xs text-gray-500 text-center">
-            {t.demoAccounts} (run <code className="bg-gray-100 px-1 rounded">npm run db:seed</code> first):</p>
-          <div className="mt-2 space-y-1 text-xs text-gray-600">
-            <p>Super Admin: superadmin@tsms.dev / superadmin123</p>
-            <p>School Admin: alice@greenfield.edu / schooladmin123</p>
-            <p>Teacher: bob@greenfield.edu / teacher123</p>
-            <p>Parent: eve@parent.dev / parent123</p>
-          </div>
-        </div>
       </div>
     </div>
   )

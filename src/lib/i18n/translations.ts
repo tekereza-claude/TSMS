@@ -54,7 +54,6 @@ const translations = {
     signInSubtitle: "Teleparenting School Management System",
     emailPlaceholder: "Email address",
     passwordPlaceholder: "Password",
-    demoAccounts: "Demo accounts",
 
     // Homepage
     heroTagForSchools: "For Schools",
@@ -203,7 +202,6 @@ const translations = {
     signInSubtitle: "Mfumo wa Usimamizi wa Shule wa Teleparenting",
     emailPlaceholder: "Anwani ya barua pepe",
     passwordPlaceholder: "Nywila",
-    demoAccounts: "Akaunti za maonyesho",
 
     heroTagForSchools: "Kwa Shule",
     heroTagForParents: "Kwa Wazazi",
@@ -346,7 +344,6 @@ const translations = {
     signInSubtitle: "Sisitemu yo Gucunga Amashuri ya Teleparenting",
     emailPlaceholder: "Aderesi ya imeyili",
     passwordPlaceholder: "Ijambo banga",
-    demoAccounts: "Konti zo kugerageza",
 
     heroTagForSchools: "Ku mashuri",
     heroTagForParents: "Ku babyeyi",

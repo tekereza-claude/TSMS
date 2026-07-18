@@ -506,39 +506,44 @@ export default function ParentDashboard() {
         <div className="fixed top-16 left-0 z-50 w-64 bg-rose-600 shadow-lg h-[calc(100vh-4rem)]">
           <div className="flex h-full flex-col">
 
-            {/* Child selector */}
+            {/* Child selector — identifies children by number + class only;
+                the student's name is reserved for the Report Card section. */}
             <div className="px-4 py-4 border-b border-rose-700">
-              <p className="text-xs text-rose-300 mb-2">Viewing child</p>
+              <p className="text-xs text-rose-300 mb-2">Viewing</p>
               <div className="relative">
                 <button
-                  onClick={() => setShowChildDropdown(!showChildDropdown)}
+                  onClick={() => children.length > 1 && setShowChildDropdown(!showChildDropdown)}
                   className="w-full flex items-center justify-between bg-rose-700 rounded-lg px-3 py-2 text-white hover:bg-rose-800 transition-colors"
                 >
                   <div className="flex items-center">
                     <div className="h-7 w-7 rounded-full bg-white flex items-center justify-center mr-2">
-                      <span className="text-xs font-bold text-rose-600">{selectedChild.firstName.charAt(0)}</span>
+                      <span className="text-xs font-bold text-rose-600">{children.findIndex((c) => c.id === selectedChild.id) + 1}</span>
                     </div>
                     <div className="text-left">
-                      <p className="text-sm font-semibold">{selectedChild.firstName} {selectedChild.lastName}</p>
+                      <p className="text-sm font-semibold">
+                        {children.length > 1 ? `Child ${children.findIndex((c) => c.id === selectedChild.id) + 1}` : "My Child"}
+                      </p>
                       <p className="text-xs text-rose-300">{selectedChild.class}</p>
                     </div>
                   </div>
-                  <ChevronDownIcon className={`h-4 w-4 transition-transform ${showChildDropdown ? "rotate-180" : ""}`} />
+                  {children.length > 1 && (
+                    <ChevronDownIcon className={`h-4 w-4 transition-transform ${showChildDropdown ? "rotate-180" : ""}`} />
+                  )}
                 </button>
 
-                {showChildDropdown && (
+                {showChildDropdown && children.length > 1 && (
                   <div className="absolute top-full left-0 right-0 mt-1 bg-white rounded-lg shadow-lg z-10 overflow-hidden">
-                    {children.map((child) => (
+                    {children.map((child, i) => (
                       <button
                         key={child.id}
                         onClick={() => { setSelectedChild(child); setShowChildDropdown(false); setSelectedTerm("Term 1") }}
                         className={`w-full flex items-center px-3 py-2 text-sm hover:bg-gray-50 transition-colors ${selectedChild.id === child.id ? "bg-rose-50" : ""}`}
                       >
                         <div className="h-7 w-7 rounded-full bg-rose-100 flex items-center justify-center mr-2">
-                          <span className="text-xs font-bold text-rose-600">{child.firstName.charAt(0)}</span>
+                          <span className="text-xs font-bold text-rose-600">{i + 1}</span>
                         </div>
                         <div className="text-left">
-                          <p className="text-sm font-medium text-gray-900">{child.firstName} {child.lastName}</p>
+                          <p className="text-sm font-medium text-gray-900">Child {i + 1}</p>
                           <p className="text-xs text-gray-500">{child.class}</p>
                         </div>
                       </button>
@@ -1036,8 +1041,6 @@ export default function ParentDashboard() {
                             </span>
                           </div>
                           <div className="mt-1 flex items-center space-x-2 text-xs text-gray-400">
-                            {c.regarding && <span>Re: {c.regarding}</span>}
-                            {c.regarding && <span>·</span>}
                             <span>{new Date(c.createdAt).toLocaleString()}</span>
                           </div>
                           {c.reply && (

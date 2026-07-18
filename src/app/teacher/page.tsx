@@ -317,6 +317,12 @@ export default function TeacherDashboard() {
   const [selectedStudent, setSelectedStudent] = useState<Student | null>(null)
   const [showStudentModal, setShowStudentModal] = useState(false)
 
+  // Marks tab filters — subject, student and score range (in addition to free-text search)
+  const [marksSubjectFilter, setMarksSubjectFilter] = useState("")
+  const [marksStudentFilter, setMarksStudentFilter] = useState("")
+  const [marksMinScore, setMarksMinScore] = useState("")
+  const [marksMaxScore, setMarksMaxScore] = useState("")
+
   // Upload state
   const [uploadStep, setUploadStep] = useState<"idle" | "preview" | "success">("idle")
   const [parsedRows, setParsedRows] = useState<ParsedRow[]>([])
@@ -455,8 +461,23 @@ export default function TeacherDashboard() {
 
   const filteredMarks = marks.filter((m) => {
     const q = search.toLowerCase()
-    return m.studentName.toLowerCase().includes(q) || m.subject.toLowerCase().includes(q)
+    const matchesSearch = !q || m.studentName.toLowerCase().includes(q) || m.subject.toLowerCase().includes(q)
+    const matchesSubject = !marksSubjectFilter || m.subject === marksSubjectFilter
+    const matchesStudent = !marksStudentFilter || m.studentId === marksStudentFilter
+    const min = marksMinScore === "" ? null : Number(marksMinScore)
+    const max = marksMaxScore === "" ? null : Number(marksMaxScore)
+    const matchesMin = min === null || isNaN(min) || m.score >= min
+    const matchesMax = max === null || isNaN(max) || m.score <= max
+    return matchesSearch && matchesSubject && matchesStudent && matchesMin && matchesMax
   })
+
+  const resetMarksFilters = () => {
+    setSearch("")
+    setMarksSubjectFilter("")
+    setMarksStudentFilter("")
+    setMarksMinScore("")
+    setMarksMaxScore("")
+  }
 
   // Grade helper
   const grade = (score: number, max: number) => {
@@ -598,7 +619,7 @@ export default function TeacherDashboard() {
                 return (
                   <button
                     key={item.id}
-                    onClick={() => { setActiveSection(item.id); setSearch("") }}
+                    onClick={() => { setActiveSection(item.id); setSearch(""); setMarksSubjectFilter(""); setMarksStudentFilter(""); setMarksMinScore(""); setMarksMaxScore("") }}
                     className={`group flex w-full items-center px-3 py-2 text-sm font-medium rounded-lg transition-colors ${
                       activeSection === item.id
                         ? "bg-white text-indigo-600"
@@ -794,7 +815,7 @@ export default function TeacherDashboard() {
             {activeSection === "marks" && (
               <div className="space-y-6">
                 <h3 className="text-2xl font-bold text-gray-900">Marks — {classLabel}</h3>
-                <div className="bg-white rounded-lg shadow p-4">
+                <div className="bg-white rounded-lg shadow p-4 space-y-3">
                   <div className="relative">
                     <MagnifyingGlassIcon className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-400" />
                     <input
@@ -804,6 +825,63 @@ export default function TeacherDashboard() {
                       onChange={(e) => setSearch(e.target.value)}
                       className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
                     />
+                  </div>
+                  <div className="flex flex-wrap items-end gap-3">
+                    <div>
+                      <label className="block text-xs font-medium text-gray-500 mb-1">Subject</label>
+                      <select
+                        value={marksSubjectFilter}
+                        onChange={(e) => setMarksSubjectFilter(e.target.value)}
+                        className="rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                      >
+                        <option value="">All subjects</option>
+                        {subjects.map((s) => (
+                          <option key={s.id} value={s.name}>{s.name}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-gray-500 mb-1">Student</label>
+                      <select
+                        value={marksStudentFilter}
+                        onChange={(e) => setMarksStudentFilter(e.target.value)}
+                        className="rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                      >
+                        <option value="">All students</option>
+                        {students.map((s) => (
+                          <option key={s.id} value={s.id}>{s.firstName} {s.lastName}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-gray-500 mb-1">Min score</label>
+                      <input
+                        type="number"
+                        min={0}
+                        placeholder="0"
+                        value={marksMinScore}
+                        onChange={(e) => setMarksMinScore(e.target.value)}
+                        className="w-24 rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-gray-500 mb-1">Max score</label>
+                      <input
+                        type="number"
+                        min={0}
+                        placeholder="100"
+                        value={marksMaxScore}
+                        onChange={(e) => setMarksMaxScore(e.target.value)}
+                        className="w-24 rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                      />
+                    </div>
+                    <button
+                      onClick={resetMarksFilters}
+                      className="px-3 py-2 text-sm text-gray-500 hover:text-red-600 transition-colors"
+                    >
+                      Clear filters
+                    </button>
+                    <p className="ml-auto text-sm text-gray-500">{filteredMarks.length} of {marks.length} records</p>
                   </div>
                 </div>
                 <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
@@ -820,28 +898,36 @@ export default function TeacherDashboard() {
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-gray-100">
-                        {filteredMarks.map((m, i) => {
-                          const g = grade(m.score, m.maxScore)
-                          return (
-                            <tr key={i} className="hover:bg-gray-50 transition-colors">
-                              <td className="px-6 py-4">
-                                <div className="flex items-center">
-                                  <div className="h-8 w-8 rounded-full bg-indigo-100 flex items-center justify-center">
-                                    <span className="text-xs font-medium text-indigo-600">{m.studentName.charAt(0)}</span>
+                        {filteredMarks.length === 0 ? (
+                          <tr>
+                            <td colSpan={6} className="px-6 py-10 text-center text-sm text-gray-500">
+                              No marks match the current filters.
+                            </td>
+                          </tr>
+                        ) : (
+                          filteredMarks.map((m, i) => {
+                            const g = grade(m.score, m.maxScore)
+                            return (
+                              <tr key={i} className="hover:bg-gray-50 transition-colors">
+                                <td className="px-6 py-4">
+                                  <div className="flex items-center">
+                                    <div className="h-8 w-8 rounded-full bg-indigo-100 flex items-center justify-center">
+                                      <span className="text-xs font-medium text-indigo-600">{m.studentName.charAt(0)}</span>
+                                    </div>
+                                    <p className="ml-3 text-sm font-medium text-gray-900">{m.studentName}</p>
                                   </div>
-                                  <p className="ml-3 text-sm font-medium text-gray-900">{m.studentName}</p>
-                                </div>
-                              </td>
-                              <td className="px-6 py-4 text-sm text-gray-700">{m.subject}</td>
-                              <td className="px-6 py-4 text-sm text-gray-700">{m.score} / {m.maxScore}</td>
-                              <td className="px-6 py-4">
-                                <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${g.color}`}>{g.label}</span>
-                              </td>
-                              <td className="px-6 py-4 text-sm text-gray-500">{m.term}</td>
-                              <td className="px-6 py-4 text-sm text-gray-500">{m.year}</td>
-                            </tr>
-                          )
-                        })}
+                                </td>
+                                <td className="px-6 py-4 text-sm text-gray-700">{m.subject}</td>
+                                <td className="px-6 py-4 text-sm text-gray-700">{m.score} / {m.maxScore}</td>
+                                <td className="px-6 py-4">
+                                  <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${g.color}`}>{g.label}</span>
+                                </td>
+                                <td className="px-6 py-4 text-sm text-gray-500">{m.term}</td>
+                                <td className="px-6 py-4 text-sm text-gray-500">{m.year}</td>
+                              </tr>
+                            )
+                          })
+                        )}
                       </tbody>
                     </table>
                   </div>
