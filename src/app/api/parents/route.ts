@@ -28,15 +28,21 @@ export async function POST(req: NextRequest) {
   if (error) return error
   await connectDB()
 
-  const { name, email, password, studentId } = await req.json()
+  const { name, email, password, phone, studentIds, studentId } = await req.json()
   if (!name || !email || !password) return err("name, email and password are required")
+  if (!phone) return err("phone is required")
 
   const schoolId = session!.user.schoolId
   if (!schoolId) return err("No school associated with this admin", 400)
 
-  if (studentId) {
-    const student = await Student.findOne({ _id: studentId, schoolId }).lean()
-    if (!student) return err("Student not found in this school", 404)
+  // Accept either a single studentId (legacy) or an array of studentIds (a parent may have several children)
+  const requestedStudentIds: string[] = Array.isArray(studentIds)
+    ? studentIds
+    : studentId ? [studentId] : []
+
+  if (requestedStudentIds.length > 0) {
+    const found = await Student.find({ _id: { $in: requestedStudentIds }, schoolId }).select("_id").lean()
+    if (found.length !== requestedStudentIds.length) return err("One or more students were not found in this school", 404)
   }
 
   const existing = await User.findOne({ email: email.toLowerCase() })
@@ -46,7 +52,8 @@ export async function POST(req: NextRequest) {
   const user = await User.create({ name, email, password: hashed, role: "PARENT" })
   const parent = await Parent.create({
     userId: user._id,
-    studentIds: studentId ? [studentId] : [],
+    studentIds: requestedStudentIds,
+    phone,
   })
 
   return ok(

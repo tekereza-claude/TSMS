@@ -22,6 +22,7 @@ import {
   PaperAirplaneIcon,
   ExclamationTriangleIcon,
   CheckCircleIcon,
+  XMarkIcon,
 } from "@heroicons/react/24/outline"
 import LanguageToggle from "@/components/LanguageToggle"
 
@@ -33,6 +34,7 @@ interface Child {
   lastName: string
   class: string
   grade: string
+  profilePicture?: string
 }
 
 interface Mark {
@@ -110,6 +112,7 @@ interface RawChild {
   marks?: RawMark[]
   discipline?: RawDiscipline[]
   fee?: RawFee | null
+  profilePicture?: string
 }
 
 async function fetchJson(url: string) {
@@ -128,6 +131,7 @@ function normalizeChild(c: RawChild): Child {
     lastName: c.lastName,
     class: c.class?.name ?? "—",
     grade: c.class?.grade ?? "",
+    profilePicture: c.profilePicture,
   }
 }
 
@@ -283,6 +287,32 @@ export default function ParentDashboard() {
   const [selectedChild, setSelectedChild] = useState<Child | null>(null)
   const [selectedTerm, setSelectedTerm] = useState("Term 1")
   const [showChildDropdown, setShowChildDropdown] = useState(false)
+
+  // "My Profile" — self-service avatar for the logged-in parent
+  const [showProfileModal, setShowProfileModal] = useState(false)
+  const [myProfilePicture, setMyProfilePicture] = useState("")
+  const [profileSaving, setProfileSaving] = useState(false)
+
+  useEffect(() => {
+    if (status !== "authenticated") return
+    fetchJson("/api/users/me")
+      .then((u) => setMyProfilePicture(u?.profilePicture || ""))
+      .catch(() => {})
+  }, [status])
+
+  const saveMyProfilePicture = async (dataUrl: string) => {
+    setProfileSaving(true)
+    try {
+      const res = await fetch("/api/users/me", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ profilePicture: dataUrl || null }),
+      })
+      if (res.ok) setMyProfilePicture(dataUrl)
+    } finally {
+      setProfileSaving(false)
+    }
+  }
 
   // Children + their marks/discipline/fees, loaded from /api/parents/me
   const [children, setChildren] = useState<Child[]>([])
@@ -491,11 +521,18 @@ export default function ParentDashboard() {
             </div>
             <div className="flex items-center space-x-3">
               <LanguageToggle />
-              <div className="h-10 w-10 rounded-full bg-rose-600 flex items-center justify-center">
-                <span className="text-white text-sm font-medium">
-                  {session?.user?.name?.charAt(0) || "P"}
-                </span>
-              </div>
+              <button
+                onClick={() => setShowProfileModal(true)}
+                title="My Profile"
+                className="h-10 w-10 rounded-full bg-rose-600 bg-cover bg-center flex items-center justify-center overflow-hidden hover:ring-2 hover:ring-rose-300 transition-shadow"
+                style={myProfilePicture ? { backgroundImage: `url(${myProfilePicture})` } : undefined}
+              >
+                {!myProfilePicture && (
+                  <span className="text-white text-sm font-medium">
+                    {session?.user?.name?.charAt(0) || "P"}
+                  </span>
+                )}
+              </button>
             </div>
           </div>
         </div>
@@ -717,8 +754,9 @@ export default function ParentDashboard() {
                   <div className="bg-white rounded-xl shadow p-6 border-t-4 border-rose-600">
                     <div className="flex items-start justify-between">
                       <div className="flex items-center space-x-4">
-                        <div className="h-16 w-16 rounded-full bg-rose-100 flex items-center justify-center">
-                          <span className="text-2xl font-bold text-rose-600">{selectedChild.firstName.charAt(0)}</span>
+                        <div className="h-16 w-16 rounded-full bg-rose-100 bg-cover bg-center flex items-center justify-center overflow-hidden"
+                          style={selectedChild.profilePicture ? { backgroundImage: `url(${selectedChild.profilePicture})` } : undefined}>
+                          {!selectedChild.profilePicture && <span className="text-2xl font-bold text-rose-600">{selectedChild.firstName.charAt(0)}</span>}
                         </div>
                         <div>
                           <h4 className="text-xl font-bold text-gray-900">{selectedChild.firstName} {selectedChild.lastName}</h4>
@@ -1220,6 +1258,44 @@ export default function ParentDashboard() {
           </main>
         </div>
       </div>
+
+      {/* ── My Profile Modal ── */}
+      {showProfileModal && (
+        <div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
+          <div className="relative top-20 mx-auto p-6 border w-11/12 md:w-96 shadow-lg rounded-lg bg-white">
+            <div className="flex justify-between items-center mb-6">
+              <h3 className="text-lg font-semibold text-gray-900">My Profile</h3>
+              <button onClick={() => setShowProfileModal(false)} className="text-gray-400 hover:text-gray-600"><XMarkIcon className="h-6 w-6" /></button>
+            </div>
+            <div className="flex flex-col items-center space-y-4">
+              <div className="h-24 w-24 rounded-full bg-rose-100 bg-cover bg-center flex items-center justify-center overflow-hidden"
+                style={myProfilePicture ? { backgroundImage: `url(${myProfilePicture})` } : undefined}>
+                {!myProfilePicture && <span className="text-3xl font-bold text-rose-600">{session?.user?.name?.charAt(0) || "P"}</span>}
+              </div>
+              <p className="text-sm font-medium text-gray-900">{session?.user?.name}</p>
+              <div className="flex items-center space-x-3">
+                <label className="px-3 py-1.5 text-sm bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 cursor-pointer transition-colors">
+                  {profileSaving ? "Saving…" : "Change Photo"}
+                  <input type="file" accept="image/*" className="hidden" disabled={profileSaving}
+                    onChange={(e) => {
+                      const file = e.target.files?.[0]
+                      if (!file) return
+                      const reader = new FileReader()
+                      reader.onload = () => saveMyProfilePicture(typeof reader.result === "string" ? reader.result : "")
+                      reader.readAsDataURL(file)
+                    }} />
+                </label>
+                {myProfilePicture && (
+                  <button type="button" onClick={() => saveMyProfilePicture("")} disabled={profileSaving} className="text-sm text-red-600 hover:underline">Remove</button>
+                )}
+              </div>
+            </div>
+            <div className="mt-6 flex justify-end">
+              <button onClick={() => setShowProfileModal(false)} className="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors">Close</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

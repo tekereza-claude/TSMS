@@ -31,7 +31,7 @@ export async function GET() {
         ? await Class.findById(student.classId).select("name grade").lean()
         : null
 
-      const marks = await Mark.find({ studentId: student._id })
+      const marks = await Mark.find({ studentId: student._id, status: "APPROVED" })
         .sort({ year: -1, term: 1 })
         .lean()
 

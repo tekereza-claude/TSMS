@@ -24,13 +24,14 @@ export async function GET(req: NextRequest) {
   const filter: Record<string, unknown> = {}
 
   if (session!.user.role === UserRole.PARENT) {
-    // Parents can only query their own children
+    // Parents can only query their own children, and only ever see marks the school has approved
     if (!studentId) return err("studentId is required for parent queries", 400)
     const parent = await Parent.findOne({ userId: session!.user.id }).lean()
     if (!parent || !parent.studentIds.map(String).includes(studentId)) {
       return err("Forbidden", 403)
     }
     filter.studentId = studentId
+    filter.status = "APPROVED"
   } else if (session!.user.role === UserRole.TEACHER) {
     // Teachers can only see marks for students in the classes assigned to them
     const teacher = await Teacher.findOne({ userId: session!.user.id }).select("_id").lean()
@@ -120,10 +121,12 @@ export async function POST(req: NextRequest) {
   }
 
   // Bulk upsert using updateOne with upsert:true. score = test + exam (out of 100).
+  // Newly uploaded/edited marks reset to PENDING — a school admin must approve
+  // them again before parents can see the updated values.
   const ops = records.map((r) => ({
     updateOne: {
       filter: { studentId: r.studentId, subjectId: r.subjectId, term: r.term, year: r.year },
-      update: { $set: { test: r.test, exam: r.exam, score: r.test + r.exam, maxScore: TEST_MAX + EXAM_MAX, teacherId: teacher._id } },
+      update: { $set: { test: r.test, exam: r.exam, score: r.test + r.exam, maxScore: TEST_MAX + EXAM_MAX, teacherId: teacher._id, status: "PENDING" as const } },
       upsert: true,
     },
   }))

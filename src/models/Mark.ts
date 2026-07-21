@@ -5,6 +5,10 @@ import mongoose, { Schema, Document, Model } from "mongoose"
 export const TEST_MAX = 50
 export const EXAM_MAX = 50
 
+// Marks start PENDING when a teacher uploads them and only become visible to
+// parents once a school admin APPROVEs them.
+export type MarkStatus = "PENDING" | "APPROVED"
+
 export interface IMark extends Document {
   _id: mongoose.Types.ObjectId
   studentId: mongoose.Types.ObjectId
@@ -16,6 +20,7 @@ export interface IMark extends Document {
   maxScore:  number
   term:      string
   year:      string
+  status:    MarkStatus
 }
 
 const MarkSchema = new Schema<IMark>(
@@ -29,6 +34,7 @@ const MarkSchema = new Schema<IMark>(
     maxScore:  { type: Number, required: true, min: 1 },
     term:      { type: String, required: true },
     year:      { type: String, required: true },
+    status:    { type: String, enum: ["PENDING", "APPROVED"], required: true, default: "PENDING" },
   },
   { timestamps: true }
 )

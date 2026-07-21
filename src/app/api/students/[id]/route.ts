@@ -30,7 +30,10 @@ export async function GET(_: NextRequest, { params }: { params: Promise<{ id: st
     if (!parent || !parent.studentIds.map(String).includes(id)) return err("Forbidden", 403)
   }
 
-  const marks = await Mark.find({ studentId: id })
+  const markFilter: Record<string, unknown> = { studentId: id }
+  if (session!.user.role === UserRole.PARENT) markFilter.status = "APPROVED"
+
+  const marks = await Mark.find(markFilter)
     .populate("subjectId", "name code")
     .populate({ path: "teacherId", populate: { path: "userId", select: "name" } })
     .sort({ year: -1, term: 1 }).lean()

@@ -28,6 +28,7 @@ interface Student {
   lastName: string
   email: string
   className?: string
+  profilePicture?: string
 }
 
 interface Subject {
@@ -46,6 +47,7 @@ interface Mark {
   maxScore: number
   term: string
   year: string
+  status: "PENDING" | "APPROVED"
 }
 
 // Raw shapes as returned by the API (Mongoose lean docs with `_id` + populated relations)
@@ -55,6 +57,7 @@ interface RawStudent {
   lastName: string
   email?: string
   classId?: { name?: string } | string | null
+  profilePicture?: string
 }
 
 interface RawSubject {
@@ -73,6 +76,7 @@ interface RawMark {
   maxScore: number
   term: string
   year: string | number
+  status?: "PENDING" | "APPROVED"
 }
 
 // Test and exam are each marked out of 50 (total 100).
@@ -140,6 +144,7 @@ function normalizeStudent(s: RawStudent): Student {
     lastName: s.lastName,
     email: s.email ?? "",
     className: cls,
+    profilePicture: s.profilePicture,
   }
 }
 
@@ -176,6 +181,7 @@ function normalizeMark(m: RawMark): Mark {
     maxScore: m.maxScore,
     term: m.term,
     year: String(m.year),
+    status: m.status ?? "PENDING",
   }
 }
 
@@ -316,6 +322,32 @@ export default function TeacherDashboard() {
   const [search, setSearch] = useState("")
   const [selectedStudent, setSelectedStudent] = useState<Student | null>(null)
   const [showStudentModal, setShowStudentModal] = useState(false)
+
+  // "My Profile" — self-service avatar for the logged-in teacher
+  const [showProfileModal, setShowProfileModal] = useState(false)
+  const [myProfilePicture, setMyProfilePicture] = useState("")
+  const [profileSaving, setProfileSaving] = useState(false)
+
+  useEffect(() => {
+    if (status !== "authenticated") return
+    fetchJson("/api/users/me")
+      .then((u) => setMyProfilePicture(u?.profilePicture || ""))
+      .catch(() => {})
+  }, [status])
+
+  const saveMyProfilePicture = async (dataUrl: string) => {
+    setProfileSaving(true)
+    try {
+      const res = await fetch("/api/users/me", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ profilePicture: dataUrl || null }),
+      })
+      if (res.ok) setMyProfilePicture(dataUrl)
+    } finally {
+      setProfileSaving(false)
+    }
+  }
 
   // Marks tab filters — subject, student and score range (in addition to free-text search)
   const [marksSubjectFilter, setMarksSubjectFilter] = useState("")
@@ -591,11 +623,18 @@ export default function TeacherDashboard() {
             </div>
             <div className="flex items-center space-x-3">
               <LanguageToggle />
-              <div className="h-10 w-10 rounded-full bg-indigo-600 flex items-center justify-center">
-                <span className="text-white text-sm font-medium">
-                  {session?.user?.name?.charAt(0) || "T"}
-                </span>
-              </div>
+              <button
+                onClick={() => setShowProfileModal(true)}
+                title="My Profile"
+                className="h-10 w-10 rounded-full bg-indigo-600 bg-cover bg-center flex items-center justify-center overflow-hidden hover:ring-2 hover:ring-indigo-300 transition-shadow"
+                style={myProfilePicture ? { backgroundImage: `url(${myProfilePicture})` } : undefined}
+              >
+                {!myProfilePicture && (
+                  <span className="text-white text-sm font-medium">
+                    {session?.user?.name?.charAt(0) || "T"}
+                  </span>
+                )}
+              </button>
             </div>
           </div>
         </div>
@@ -773,8 +812,9 @@ export default function TeacherDashboard() {
                             <tr key={s.id} className="hover:bg-gray-50 transition-colors">
                               <td className="px-6 py-4">
                                 <div className="flex items-center">
-                                  <div className="h-10 w-10 rounded-full bg-indigo-100 flex items-center justify-center">
-                                    <span className="text-sm font-medium text-indigo-600">{s.firstName.charAt(0)}</span>
+                                  <div className="h-10 w-10 rounded-full bg-indigo-100 bg-cover bg-center flex items-center justify-center overflow-hidden"
+                                    style={s.profilePicture ? { backgroundImage: `url(${s.profilePicture})` } : undefined}>
+                                    {!s.profilePicture && <span className="text-sm font-medium text-indigo-600">{s.firstName.charAt(0)}</span>}
                                   </div>
                                   <div className="ml-3">
                                     <p className="text-sm font-medium text-gray-900">{s.firstName} {s.lastName}</p>
@@ -895,12 +935,13 @@ export default function TeacherDashboard() {
                           <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Grade</th>
                           <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Term</th>
                           <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Year</th>
+                          <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Status</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-gray-100">
                         {filteredMarks.length === 0 ? (
                           <tr>
-                            <td colSpan={6} className="px-6 py-10 text-center text-sm text-gray-500">
+                            <td colSpan={7} className="px-6 py-10 text-center text-sm text-gray-500">
                               No marks match the current filters.
                             </td>
                           </tr>
@@ -924,6 +965,13 @@ export default function TeacherDashboard() {
                                 </td>
                                 <td className="px-6 py-4 text-sm text-gray-500">{m.term}</td>
                                 <td className="px-6 py-4 text-sm text-gray-500">{m.year}</td>
+                                <td className="px-6 py-4">
+                                  <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${
+                                    m.status === "APPROVED" ? "text-green-700 bg-green-100" : "text-orange-700 bg-orange-100"
+                                  }`}>
+                                    {m.status === "APPROVED" ? "Approved" : "Pending"}
+                                  </span>
+                                </td>
                               </tr>
                             )
                           })
@@ -1401,6 +1449,44 @@ export default function TeacherDashboard() {
 
             <div className="mt-6 flex justify-end">
               <button onClick={() => setShowStudentModal(false)} className="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors">Close</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── My Profile Modal ── */}
+      {showProfileModal && (
+        <div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
+          <div className="relative top-20 mx-auto p-6 border w-11/12 md:w-96 shadow-lg rounded-lg bg-white">
+            <div className="flex justify-between items-center mb-6">
+              <h3 className="text-lg font-semibold text-gray-900">My Profile</h3>
+              <button onClick={() => setShowProfileModal(false)} className="text-gray-400 hover:text-gray-600"><XMarkIcon className="h-6 w-6" /></button>
+            </div>
+            <div className="flex flex-col items-center space-y-4">
+              <div className="h-24 w-24 rounded-full bg-indigo-100 bg-cover bg-center flex items-center justify-center overflow-hidden"
+                style={myProfilePicture ? { backgroundImage: `url(${myProfilePicture})` } : undefined}>
+                {!myProfilePicture && <span className="text-3xl font-bold text-indigo-600">{session?.user?.name?.charAt(0) || "T"}</span>}
+              </div>
+              <p className="text-sm font-medium text-gray-900">{session?.user?.name}</p>
+              <div className="flex items-center space-x-3">
+                <label className="px-3 py-1.5 text-sm bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 cursor-pointer transition-colors">
+                  {profileSaving ? "Saving…" : "Change Photo"}
+                  <input type="file" accept="image/*" className="hidden" disabled={profileSaving}
+                    onChange={(e) => {
+                      const file = e.target.files?.[0]
+                      if (!file) return
+                      const reader = new FileReader()
+                      reader.onload = () => saveMyProfilePicture(typeof reader.result === "string" ? reader.result : "")
+                      reader.readAsDataURL(file)
+                    }} />
+                </label>
+                {myProfilePicture && (
+                  <button type="button" onClick={() => saveMyProfilePicture("")} disabled={profileSaving} className="text-sm text-red-600 hover:underline">Remove</button>
+                )}
+              </div>
+            </div>
+            <div className="mt-6 flex justify-end">
+              <button onClick={() => setShowProfileModal(false)} className="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors">Close</button>
             </div>
           </div>
         </div>

@@ -19,6 +19,7 @@ import {
   HomeModernIcon,
   ChatBubbleLeftRightIcon,
   EnvelopeOpenIcon,
+  CheckCircleIcon,
 } from "@heroicons/react/24/outline"
 import LanguageToggle from "@/components/LanguageToggle"
 
@@ -165,6 +166,7 @@ interface Parent {
   id: string
   name: string
   email: string
+  phone: string
   students: { id: string; firstName: string; lastName: string }[]
   joinedDate: string
 }
@@ -173,6 +175,7 @@ interface RawParent {
   _id: string
   userId: RawUser | null
   studentIds: { _id: string; firstName: string; lastName: string }[]
+  phone?: string
   createdAt?: string
 }
 
@@ -181,12 +184,13 @@ function normalizeParent(p: RawParent): Parent {
     id: String(p._id),
     name: p.userId?.name ?? "Unknown",
     email: p.userId?.email ?? "",
+    phone: p.phone ?? "",
     students: (p.studentIds ?? []).map((s) => ({ id: String(s._id), firstName: s.firstName, lastName: s.lastName })),
     joinedDate: shortDate(p.userId?.createdAt ?? p.createdAt),
   }
 }
 
-type Section = "overview" | "teachers" | "students" | "classes" | "subjects" | "fees" | "parents" | "messages"
+type Section = "overview" | "teachers" | "students" | "classes" | "subjects" | "fees" | "parents" | "marksApproval" | "messages"
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
@@ -209,6 +213,15 @@ export default function SchoolAdminDashboard() {
   const [editAvatar, setEditAvatar] = useState("")
   const [formSaving, setFormSaving] = useState(false)
   const [formError, setFormError] = useState<string | null>(null)
+  // Add-Parent form: a parent may be linked to several children at once
+  const [selectedStudentIds, setSelectedStudentIds] = useState<string[]>([])
+  const toggleSelectedStudent = (id: string) =>
+    setSelectedStudentIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]))
+
+  // "My Profile" — self-service avatar for the logged-in admin
+  const [showProfileModal, setShowProfileModal] = useState(false)
+  const [myProfilePicture, setMyProfilePicture] = useState("")
+  const [profileSaving, setProfileSaving] = useState(false)
 
   // Data
   const [teachers, setTeachers] = useState<Teacher[]>([])
@@ -366,7 +379,7 @@ export default function SchoolAdminDashboard() {
 
   // ── CRUD ──
 
-  const openAdd = () => { setForm({}); setStudentAvatar(""); setFormError(null); setShowAddModal(true) }
+  const openAdd = () => { setForm({}); setStudentAvatar(""); setSelectedStudentIds([]); setFormError(null); setShowAddModal(true) }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const openEdit = (item: any) => {
@@ -386,7 +399,7 @@ export default function SchoolAdminDashboard() {
     if (s === "teachers") return { name: form.name, email: form.email, password: form.password }
     if (s === "students") return { firstName: form.firstName, lastName: form.lastName, email: form.email || undefined, classId: form.classId || undefined, profilePicture: avatar || undefined }
     if (s === "classes") return { name: form.name, grade: form.grade, teacherId: form.teacherId || undefined }
-    if (s === "parents") return { name: form.name, email: form.email, password: form.password, studentId: form.studentId || undefined }
+    if (s === "parents") return { name: form.name, email: form.email, password: form.password, phone: form.phone, studentIds: selectedStudentIds }
     return { name: form.name, code: form.code, teacherId: form.teacherId || undefined }
   }
 
@@ -495,6 +508,76 @@ export default function SchoolAdminDashboard() {
     }
   }
 
+  // ── Marks approval ──
+  interface PendingBatch {
+    classId: string; className: string; grade: string
+    subjectId: string; subjectName: string; subjectCode: string
+    teacherName: string; term: string; year: string; count: number
+  }
+  const [pendingBatches, setPendingBatches] = useState<PendingBatch[]>([])
+  const [pendingLoading, setPendingLoading] = useState(false)
+  const [approvingKey, setApprovingKey] = useState<string | null>(null)
+
+  const batchKey = (b: PendingBatch) => `${b.classId}|${b.subjectId}|${b.term}|${b.year}`
+
+  const loadPendingMarks = useCallback(async () => {
+    setPendingLoading(true)
+    try {
+      const data = await fetchJson("/api/marks/pending")
+      setPendingBatches(Array.isArray(data) ? data : [])
+    } catch {
+      // non-critical — leave the previous list in place
+    } finally {
+      setPendingLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (activeSection === "marksApproval" && status === "authenticated") loadPendingMarks()
+  }, [activeSection, status, loadPendingMarks])
+
+  const approveBatch = async (b: PendingBatch) => {
+    setApprovingKey(batchKey(b))
+    try {
+      const res = await fetch("/api/marks/approve", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ classId: b.classId, subjectId: b.subjectId, term: b.term, year: b.year }),
+      })
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}))
+        throw new Error(body.error || "Failed to approve")
+      }
+      setPendingBatches((prev) => prev.filter((x) => batchKey(x) !== batchKey(b)))
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "Failed to approve")
+    } finally {
+      setApprovingKey(null)
+    }
+  }
+
+  // ── My profile (self-service avatar) ──
+  useEffect(() => {
+    if (status !== "authenticated") return
+    fetchJson("/api/users/me")
+      .then((u) => setMyProfilePicture(u?.profilePicture || ""))
+      .catch(() => {})
+  }, [status])
+
+  const saveMyProfilePicture = async (dataUrl: string) => {
+    setProfileSaving(true)
+    try {
+      const res = await fetch("/api/users/me", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ profilePicture: dataUrl || null }),
+      })
+      if (res.ok) setMyProfilePicture(dataUrl)
+    } finally {
+      setProfileSaving(false)
+    }
+  }
+
   const menuItems = [
     { id: "overview", label: "Overview", icon: ChartBarIcon },
     { id: "teachers", label: "Teachers", icon: UserGroupIcon },
@@ -503,6 +586,7 @@ export default function SchoolAdminDashboard() {
     { id: "subjects", label: "Subjects", icon: BookOpenIcon },
     { id: "fees", label: "Fees", icon: BanknotesIcon },
     { id: "parents", label: "Parents", icon: HomeModernIcon },
+    { id: "marksApproval", label: "Marks Approval", icon: CheckCircleIcon, badge: pendingBatches.length },
     { id: "messages", label: "Messages", icon: ChatBubbleLeftRightIcon, badge: unreadCount },
   ] as const
 
@@ -540,11 +624,18 @@ export default function SchoolAdminDashboard() {
             </div>
             <div className="flex items-center space-x-3">
               <LanguageToggle />
-              <div className="h-10 w-10 rounded-full bg-green-600 flex items-center justify-center">
-                <span className="text-white text-sm font-medium">
-                  {session?.user?.name?.charAt(0) || "A"}
-                </span>
-              </div>
+              <button
+                onClick={() => setShowProfileModal(true)}
+                title="My Profile"
+                className="h-10 w-10 rounded-full bg-green-600 bg-cover bg-center flex items-center justify-center overflow-hidden hover:ring-2 hover:ring-green-300 transition-shadow"
+                style={myProfilePicture ? { backgroundImage: `url(${myProfilePicture})` } : undefined}
+              >
+                {!myProfilePicture && (
+                  <span className="text-white text-sm font-medium">
+                    {session?.user?.name?.charAt(0) || "A"}
+                  </span>
+                )}
+              </button>
             </div>
           </div>
         </div>
@@ -957,6 +1048,7 @@ export default function SchoolAdminDashboard() {
                       <thead>
                         <tr className="border-b border-gray-200 bg-gray-50">
                           <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Parent</th>
+                          <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Phone</th>
                           <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Linked Students</th>
                           <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Joined</th>
                           <th className="px-6 py-3 text-right text-xs font-semibold text-gray-600 uppercase tracking-wider">Actions</th>
@@ -976,6 +1068,7 @@ export default function SchoolAdminDashboard() {
                                 </div>
                               </div>
                             </td>
+                            <td className="px-6 py-4 text-sm text-gray-700">{p.phone || "—"}</td>
                             <td className="px-6 py-4">
                               <div className="flex flex-wrap gap-1">
                                 {p.students.length ? p.students.map((s) => (
@@ -990,12 +1083,73 @@ export default function SchoolAdminDashboard() {
                           </tr>
                         ))}
                         {filteredParents.length === 0 && (
-                          <tr><td colSpan={4} className="px-6 py-8 text-center text-sm text-gray-400">No parents found.</td></tr>
+                          <tr><td colSpan={5} className="px-6 py-8 text-center text-sm text-gray-400">No parents found.</td></tr>
                         )}
                       </tbody>
                     </table>
                   </div>
                 </div>
+              </div>
+            )}
+
+            {/* ── Marks Approval ── */}
+            {activeSection === "marksApproval" && (
+              <div className="space-y-6">
+                <div>
+                  <h3 className="text-2xl font-bold text-gray-900">Marks Approval</h3>
+                  <p className="text-sm text-gray-500 mt-0.5">
+                    Marks a teacher uploads stay pending until you release them — parents only see marks after approval.
+                  </p>
+                </div>
+
+                {pendingLoading ? (
+                  <div className="flex items-center justify-center py-16">
+                    <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-green-600"></div>
+                  </div>
+                ) : (
+                  <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+                    <div className="overflow-x-auto">
+                      <table className="min-w-full">
+                        <thead>
+                          <tr className="border-b border-gray-200 bg-gray-50">
+                            <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Class</th>
+                            <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Subject</th>
+                            <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Teacher</th>
+                            <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Term / Year</th>
+                            <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Marks</th>
+                            <th className="px-6 py-3 text-right text-xs font-semibold text-gray-600 uppercase tracking-wider">Actions</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-100">
+                          {pendingBatches.map((b) => (
+                            <tr key={batchKey(b)} className="hover:bg-gray-50 transition-colors">
+                              <td className="px-6 py-4 text-sm font-medium text-gray-900">{b.className} <span className="text-gray-400 font-normal">({b.grade})</span></td>
+                              <td className="px-6 py-4 text-sm text-gray-700">{b.subjectName} <span className="text-gray-400">({b.subjectCode})</span></td>
+                              <td className="px-6 py-4 text-sm text-gray-700">{b.teacherName}</td>
+                              <td className="px-6 py-4 text-sm text-gray-700">{b.term} / {b.year}</td>
+                              <td className="px-6 py-4">
+                                <span className="inline-flex px-2 py-0.5 text-xs font-semibold rounded-full bg-orange-100 text-orange-800">{b.count} pending</span>
+                              </td>
+                              <td className="px-6 py-4 text-right">
+                                <button
+                                  onClick={() => approveBatch(b)}
+                                  disabled={approvingKey === batchKey(b)}
+                                  className="inline-flex items-center px-3 py-1.5 text-xs font-medium text-white bg-green-600 rounded-md hover:bg-green-700 transition-colors disabled:opacity-50"
+                                >
+                                  <CheckCircleIcon className="h-4 w-4 mr-1" />
+                                  {approvingKey === batchKey(b) ? "Approving…" : "Approve"}
+                                </button>
+                              </td>
+                            </tr>
+                          ))}
+                          {pendingBatches.length === 0 && (
+                            <tr><td colSpan={6} className="px-6 py-8 text-center text-sm text-gray-400">Nothing pending — all uploaded marks are approved.</td></tr>
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
 
@@ -1234,13 +1388,31 @@ export default function SchoolAdminDashboard() {
                     <input type="password" required value={form.password || ""} onChange={(e) => setForm((f) => ({ ...f, password: e.target.value }))} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500" placeholder="••••••••" />
                   </div>
                   {activeSection === "parents" && (
-                    <div className="col-span-2">
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Link to Student <span className="text-gray-400 font-normal">(optional)</span></label>
-                      <select value={form.studentId || ""} onChange={(e) => setForm((f) => ({ ...f, studentId: e.target.value }))} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500">
-                        <option value="">Select student</option>
-                        {students.map((s) => <option key={s.id} value={s.id}>{s.firstName} {s.lastName}</option>)}
-                      </select>
-                    </div>
+                    <>
+                      <div className="col-span-2">
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Phone *</label>
+                        <input type="tel" required value={form.phone || ""} onChange={(e) => setForm((f) => ({ ...f, phone: e.target.value }))} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500" placeholder="+250 7XX XXX XXX" />
+                      </div>
+                      <div className="col-span-2">
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                          Link to Students <span className="text-gray-400 font-normal">(a parent can have more than one child)</span>
+                        </label>
+                        <div className="max-h-40 overflow-y-auto border border-gray-300 rounded-lg divide-y divide-gray-100">
+                          {students.length === 0 && <p className="px-3 py-2 text-sm text-gray-400">No students yet.</p>}
+                          {students.map((s) => (
+                            <label key={s.id} className="flex items-center px-3 py-2 text-sm hover:bg-gray-50 cursor-pointer">
+                              <input
+                                type="checkbox"
+                                checked={selectedStudentIds.includes(s.id)}
+                                onChange={() => toggleSelectedStudent(s.id)}
+                                className="h-4 w-4 text-green-600 border-gray-300 rounded focus:ring-green-500"
+                              />
+                              <span className="ml-2 text-gray-700">{s.firstName} {s.lastName}</span>
+                            </label>
+                          ))}
+                        </div>
+                      </div>
+                    </>
                   )}
                 </div>
               )}
@@ -1477,6 +1649,44 @@ export default function SchoolAdminDashboard() {
                 <button type="submit" disabled={formSaving} className="px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors disabled:opacity-50">{formSaving ? "Saving…" : "Save Changes"}</button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* ── My Profile Modal ── */}
+      {showProfileModal && (
+        <div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
+          <div className="relative top-20 mx-auto p-6 border w-11/12 md:w-96 shadow-lg rounded-lg bg-white">
+            <div className="flex justify-between items-center mb-6">
+              <h3 className="text-lg font-semibold text-gray-900">My Profile</h3>
+              <button onClick={() => setShowProfileModal(false)} className="text-gray-400 hover:text-gray-600"><XMarkIcon className="h-6 w-6" /></button>
+            </div>
+            <div className="flex flex-col items-center space-y-4">
+              <div className="h-24 w-24 rounded-full bg-green-100 bg-cover bg-center flex items-center justify-center overflow-hidden"
+                style={myProfilePicture ? { backgroundImage: `url(${myProfilePicture})` } : undefined}>
+                {!myProfilePicture && <span className="text-3xl font-bold text-green-600">{session?.user?.name?.charAt(0) || "A"}</span>}
+              </div>
+              <p className="text-sm font-medium text-gray-900">{session?.user?.name}</p>
+              <div className="flex items-center space-x-3">
+                <label className="px-3 py-1.5 text-sm bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 cursor-pointer transition-colors">
+                  {profileSaving ? "Saving…" : "Change Photo"}
+                  <input type="file" accept="image/*" className="hidden" disabled={profileSaving}
+                    onChange={(e) => {
+                      const file = e.target.files?.[0]
+                      if (!file) return
+                      const reader = new FileReader()
+                      reader.onload = () => saveMyProfilePicture(typeof reader.result === "string" ? reader.result : "")
+                      reader.readAsDataURL(file)
+                    }} />
+                </label>
+                {myProfilePicture && (
+                  <button type="button" onClick={() => saveMyProfilePicture("")} disabled={profileSaving} className="text-sm text-red-600 hover:underline">Remove</button>
+                )}
+              </div>
+            </div>
+            <div className="mt-6 flex justify-end">
+              <button onClick={() => setShowProfileModal(false)} className="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors">Close</button>
+            </div>
           </div>
         </div>
       )}
