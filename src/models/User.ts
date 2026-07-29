@@ -9,17 +9,21 @@ export interface IUser extends Document {
   password: string
   role: UserRole
   profilePicture?: string   // base64 data URL
+  resetPasswordTokenHash?: string
+  resetPasswordExpires?: Date
   createdAt: Date
   updatedAt: Date
 }
 
 const UserSchema = new Schema<IUser>(
   {
-    name:           { type: String, required: true },
-    email:          { type: String, required: true, unique: true, lowercase: true },
-    password:       { type: String, required: true },
-    role:           { type: String, enum: ["SUPER_ADMIN", "SCHOOL_ADMIN", "TEACHER", "PARENT"], required: true },
-    profilePicture: { type: String },
+    name:                   { type: String, required: true },
+    email:                  { type: String, required: true, unique: true, lowercase: true },
+    password:               { type: String, required: true },
+    role:                   { type: String, enum: ["SUPER_ADMIN", "SCHOOL_ADMIN", "TEACHER", "PARENT"], required: true },
+    profilePicture:         { type: String },
+    resetPasswordTokenHash: { type: String, select: false },
+    resetPasswordExpires:   { type: Date, select: false },
   },
   { timestamps: true }
 )

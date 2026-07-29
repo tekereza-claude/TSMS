@@ -28,7 +28,7 @@ export default function SignIn() {
       })
 
       if (result?.error) {
-        setError(t.invalidCredentials)
+        setError(result.error === "CredentialsSignin" ? t.invalidCredentials : result.error)
       } else {
         const session = await getSession()
         if (session?.user?.role) {
@@ -118,6 +118,12 @@ export default function SignIn() {
             </div>
           </div>
 
+          <div className="flex justify-end">
+            <Link href="/auth/forgot-password" className="text-sm font-medium text-blue-600 hover:text-blue-500">
+              {t.forgotPasswordLink}
+            </Link>
+          </div>
+
           <div>
             <button
               type="submit"
@@ -128,7 +134,17 @@ export default function SignIn() {
             </button>
           </div>
 
-          <div className="text-sm">
+          <div className="text-sm space-y-2">
+            <p className="text-gray-600">
+              {t.applyPrompt}{" "}
+              <Link href="/auth/apply/school" className="font-medium text-blue-600 hover:text-blue-500">
+                {t.applyAsSchool}
+              </Link>
+              {" · "}
+              <Link href="/auth/apply/parent" className="font-medium text-blue-600 hover:text-blue-500">
+                {t.applyAsParent}
+              </Link>
+            </p>
             <Link href="/" className="font-medium text-blue-600 hover:text-blue-500">
               {t.backToHome}
             </Link>

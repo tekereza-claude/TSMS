@@ -8,6 +8,7 @@ export interface IStudent extends Document {
   schoolId:  mongoose.Types.ObjectId
   classId?:  mongoose.Types.ObjectId
   profilePicture?: string   // base64 data URL
+  admissionCode: string     // given to a parent so they can apply to be linked to this student
 }
 
 const StudentSchema = new Schema<IStudent>(
@@ -18,6 +19,7 @@ const StudentSchema = new Schema<IStudent>(
     schoolId:       { type: Schema.Types.ObjectId, ref: "School",  required: true },
     classId:        { type: Schema.Types.ObjectId, ref: "Class" },
     profilePicture: { type: String },
+    admissionCode:  { type: String, required: true, unique: true, sparse: true, uppercase: true },
   },
   { timestamps: true }
 )

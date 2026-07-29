@@ -54,6 +54,7 @@ export async function POST(req: NextRequest) {
     userId: user._id,
     studentIds: requestedStudentIds,
     phone,
+    status: "APPROVED",
   })
 
   return ok(

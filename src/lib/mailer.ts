@@ -59,3 +59,54 @@ export function credentialsEmail({
     </div>
   `
 }
+
+export function approvedNoCredentialsEmail({
+  title,
+  loginUrl,
+}: {
+  title: string
+  loginUrl: string
+}) {
+  return `
+    <div style="font-family:Arial,sans-serif;max-width:560px;margin:0 auto;padding:32px;border:1px solid #e5e7eb;border-radius:8px;">
+      <h2 style="color:#16a34a;margin-bottom:4px;">You're approved 🎉</h2>
+      <p style="color:#6b7280;margin-top:0;">${title}</p>
+
+      <a href="${loginUrl}" style="display:inline-block;margin-top:16px;background:#16a34a;color:#fff;padding:12px 28px;border-radius:6px;text-decoration:none;font-weight:600;">
+        Sign In
+      </a>
+    </div>
+  `
+}
+
+export function applicationRejectedEmail({ title }: { title: string }) {
+  return `
+    <div style="font-family:Arial,sans-serif;max-width:560px;margin:0 auto;padding:32px;border:1px solid #e5e7eb;border-radius:8px;">
+      <h2 style="color:#dc2626;margin-bottom:4px;">Application Update</h2>
+      <p style="color:#6b7280;margin-top:0;">${title}</p>
+    </div>
+  `
+}
+
+export function passwordResetEmail({
+  name,
+  resetUrl,
+}: {
+  name: string
+  resetUrl: string
+}) {
+  return `
+    <div style="font-family:Arial,sans-serif;max-width:560px;margin:0 auto;padding:32px;border:1px solid #e5e7eb;border-radius:8px;">
+      <h2 style="color:#2563eb;margin-bottom:4px;">Reset your password</h2>
+      <p style="color:#6b7280;margin-top:0;">Hi ${name}, we received a request to reset your TSMS password. This link expires in 1 hour.</p>
+
+      <a href="${resetUrl}" style="display:inline-block;margin-top:16px;background:#2563eb;color:#fff;padding:12px 28px;border-radius:6px;text-decoration:none;font-weight:600;">
+        Reset Password
+      </a>
+
+      <p style="margin-top:24px;font-size:13px;color:#9ca3af;">
+        If you did not request this, you can safely ignore this email — your password will not change.
+      </p>
+    </div>
+  `
+}

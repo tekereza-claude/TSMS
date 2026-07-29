@@ -2,7 +2,7 @@
 
 import { useSession, signOut } from "next-auth/react"
 import { useRouter } from "next/navigation"
-import { useEffect, useState, type FormEvent } from "react"
+import { useEffect, useState, useCallback, type FormEvent } from "react"
 import {
   AcademicCapIcon,
   ArrowRightOnRectangleIcon,
@@ -23,6 +23,7 @@ import {
   ExclamationTriangleIcon,
   CheckCircleIcon,
   XMarkIcon,
+  BellIcon,
 } from "@heroicons/react/24/outline"
 import LanguageToggle from "@/components/LanguageToggle"
 
@@ -330,6 +331,30 @@ export default function ParentDashboard() {
   const [commentError, setCommentError] = useState("")
   const [myComments, setMyComments] = useState<CommentItem[]>([])
 
+  // Notifications (real, persisted via /api/notifications)
+  interface NotificationItem { _id: string; title: string; body: string; read: boolean; createdAt: string }
+  const [notifications, setNotifications] = useState<NotificationItem[]>([])
+  const [unreadNotifCount, setUnreadNotifCount] = useState(0)
+
+  const loadNotifications = useCallback(() => {
+    fetch("/api/notifications")
+      .then((r) => (r.ok ? r.json() : { notifications: [], unreadCount: 0 }))
+      .then((data) => {
+        setNotifications(Array.isArray(data.notifications) ? data.notifications : [])
+        setUnreadNotifCount(data.unreadCount ?? 0)
+      })
+      .catch(() => {})
+  }, [])
+
+  const markAllNotificationsRead = async () => {
+    try {
+      await fetch("/api/notifications/mark-all-read", { method: "PATCH" })
+      loadNotifications()
+    } catch {
+      // non-critical
+    }
+  }
+
   useEffect(() => {
     if (status === "loading") return
     if (!session) { router.push("/auth/signin"); return }
@@ -344,6 +369,11 @@ export default function ParentDashboard() {
       .then((data) => setMyComments(Array.isArray(data) ? data : []))
       .catch(() => { })
   }, [status])
+
+  useEffect(() => {
+    if (status !== "authenticated") return
+    loadNotifications()
+  }, [status, loadNotifications])
 
   // Load the parent's children + marks/discipline/fees
   useEffect(() => {
@@ -448,7 +478,8 @@ export default function ParentDashboard() {
     { id: "discipline_financial", label: "Discipline & Financial", icon: ShieldExclamationIcon },
     { id: "messages", label: "Messages", icon: ChatBubbleLeftRightIcon },
     { id: "careers", label: "Career Insights", icon: LightBulbIcon },
-  ]
+    { id: "notifications", label: "Notifications", icon: BellIcon, badge: unreadNotifCount },
+  ] as const
 
   if (status === "loading" || dataLoading) {
     return (
@@ -604,6 +635,11 @@ export default function ParentDashboard() {
                   >
                     <Icon className="mr-3 h-5 w-5" />
                     {item.label}
+                    {"badge" in item && item.badge > 0 && (
+                      <span className="ml-auto bg-white text-rose-700 text-xs font-bold px-1.5 py-0.5 rounded-full">
+                        {item.badge}
+                      </span>
+                    )}
                   </button>
                 )
               })}
@@ -634,6 +670,7 @@ export default function ParentDashboard() {
                   {activeSection === "discipline_financial" && "Discipline & Financial"}
                   {activeSection === "messages" && "Messages to School"}
                   {activeSection === "careers" && "Career Insights"}
+                  {activeSection === "notifications" && "Notifications"}
                 </h3>
                 <p className="text-sm text-gray-500 mt-0.5">
                   {activeSection === "report"
@@ -1090,6 +1127,36 @@ export default function ParentDashboard() {
                         </li>
                       ))}
                     </ul>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* ── Notifications ── */}
+            {activeSection === "notifications" && (
+              <div className="space-y-6">
+                <div className="flex justify-between items-center">
+                  <p className="text-sm text-gray-500">Updates about marks, replies and your account.</p>
+                  {unreadNotifCount > 0 && (
+                    <button onClick={markAllNotificationsRead} className="px-3 py-1.5 text-xs font-medium text-rose-600 bg-rose-50 rounded-md hover:bg-rose-100 transition-colors">
+                      Mark all read
+                    </button>
+                  )}
+                </div>
+                <div className="bg-white rounded-xl shadow-sm border border-gray-200 divide-y divide-gray-100">
+                  {notifications.length === 0 ? (
+                    <p className="text-center text-sm text-gray-400 py-12">No notifications yet.</p>
+                  ) : (
+                    notifications.map((n) => (
+                      <div key={n._id} className={`px-6 py-4 flex gap-3 ${!n.read ? "bg-rose-50/50" : ""}`}>
+                        {!n.read && <span className="mt-1.5 h-2 w-2 rounded-full bg-rose-500 flex-shrink-0" />}
+                        <div className={!n.read ? "" : "pl-5"}>
+                          <p className="text-sm font-medium text-gray-900">{n.title}</p>
+                          <p className="text-sm text-gray-600 mt-0.5">{n.body}</p>
+                          <p className="text-xs text-gray-400 mt-1">{new Date(n.createdAt).toLocaleString()}</p>
+                        </div>
+                      </div>
+                    ))
                   )}
                 </div>
               </div>

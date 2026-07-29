@@ -5,7 +5,15 @@ import { connectDB } from "@/lib/mongoose"
 import User from "@/models/User"
 import SchoolAdmin from "@/models/SchoolAdmin"
 import Teacher from "@/models/Teacher"
+import School from "@/models/School"
+import Parent from "@/models/Parent"
 import { UserRole } from "@/types"
+
+function pendingMessage(status: string, subject: "school application" | "parent application") {
+  return status === "REJECTED"
+    ? `Your ${subject} was rejected. Please contact the school for more information.`
+    : `Your ${subject} is still pending approval.`
+}
 
 export const authOptions: NextAuthOptions = {
   providers: [
@@ -32,9 +40,18 @@ export const authOptions: NextAuthOptions = {
         if (user.role === "SCHOOL_ADMIN") {
           const sa = await SchoolAdmin.findOne({ userId: user._id }).lean()
           schoolId = sa?.schoolId?.toString()
+          const school = schoolId ? await School.findById(schoolId).select("status").lean() : null
+          if (school && school.status !== "APPROVED") {
+            throw new Error(pendingMessage(school.status, "school application"))
+          }
         } else if (user.role === "TEACHER") {
           const t = await Teacher.findOne({ userId: user._id }).lean()
           schoolId = t?.schoolId?.toString()
+        } else if (user.role === "PARENT") {
+          const parent = await Parent.findOne({ userId: user._id }).select("status").lean()
+          if (parent && parent.status !== "APPROVED") {
+            throw new Error(pendingMessage(parent.status, "parent application"))
+          }
         }
 
         return {

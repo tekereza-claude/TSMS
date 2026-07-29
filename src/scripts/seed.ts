@@ -130,10 +130,11 @@ async function main() {
 
   // ── Students ─────────────────────────────────────────────────────────────
   const [student1, student2] = await Student.insertMany([
-    { firstName: "Claire", lastName: "Uwimana", email: "claire@student.dev", schoolId: school._id, classId: cls._id },
-    { firstName: "David", lastName: "Habimana", email: "david@student.dev", schoolId: school._id, classId: cls._id },
+    { firstName: "Claire", lastName: "Uwimana", email: "claire@student.dev", schoolId: school._id, classId: cls._id, admissionCode: "CLAIRE01" },
+    { firstName: "David", lastName: "Habimana", email: "david@student.dev", schoolId: school._id, classId: cls._id, admissionCode: "DAVID001" },
   ])
   console.log("Created students:", student1.firstName, "&", student2.firstName)
+  console.log("  Admission codes:", student1.admissionCode, "&", student2.admissionCode)
 
   // ── Marks ────────────────────────────────────────────────────────────────
   const marksData = [
@@ -221,6 +222,8 @@ async function main() {
   await Parent.create({
     userId: parentUser._id,
     studentIds: [student1._id, student2._id],
+    phone: "+250 788 000 002",
+    status: "APPROVED",
   })
   console.log("Created parent:", parentUser.email)
 

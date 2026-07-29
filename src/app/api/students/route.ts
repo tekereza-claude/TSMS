@@ -4,6 +4,7 @@ import Student from "@/models/Student"
 import Class from "@/models/Class"
 import Teacher from "@/models/Teacher"
 import { requireRole, ok, err } from "@/lib/api-helpers"
+import { generateAdmissionCode } from "@/lib/codes"
 import { UserRole } from "@/types"
 
 export async function GET() {
@@ -29,6 +30,7 @@ export async function POST(req: NextRequest) {
   if (!firstName || !lastName) return err("firstName and lastName are required")
   const schoolId = session!.user.schoolId
   if (!schoolId) return err("No school associated with this admin", 400)
+  const admissionCode = await generateAdmissionCode()
   const student = await Student.create({
     firstName,
     lastName,
@@ -36,6 +38,7 @@ export async function POST(req: NextRequest) {
     schoolId,
     classId: classId || undefined,
     profilePicture: profilePicture || undefined,
+    admissionCode,
   })
   return ok(student, 201)
 }

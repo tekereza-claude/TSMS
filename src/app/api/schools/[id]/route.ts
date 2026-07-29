@@ -6,7 +6,7 @@ import User from "@/models/User"
 import { requireRole, ok, err } from "@/lib/api-helpers"
 import { UserRole } from "@/types"
 import { hashPassword } from "@/lib/password"
-import { sendMail, credentialsEmail } from "@/lib/mailer"
+import { sendMail, credentialsEmail, approvedNoCredentialsEmail, applicationRejectedEmail } from "@/lib/mailer"
 
 function randomPassword(len = 12) {
   const chars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789@#!"
@@ -36,12 +36,15 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   const school = await School.findByIdAndUpdate(id, body, { new: true }).lean()
   if (!school) return err("School not found", 404)
 
-  // When a school is approved for the first time, create a school admin account
-  // and email the credentials to the school's registered email address.
+  const loginUrl = `${process.env.NEXTAUTH_URL ?? "http://localhost:3000"}/auth/signin`
   const justApproved = before.status !== "APPROVED" && school.status === "APPROVED"
+  const justRejected = before.status !== "REJECTED" && school.status === "REJECTED"
+
   if (justApproved) {
     const existingAdmin = await SchoolAdmin.findOne({ schoolId: school._id }).lean()
+
     if (!existingAdmin) {
+      // Manually-added school with no admin yet — create one and email the generated credentials.
       const plainPassword = randomPassword()
       const adminName = `${school.name} Admin`
       const adminEmail = school.email.toLowerCase()
@@ -59,8 +62,6 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
       await SchoolAdmin.create({ userId: user._id, schoolId: school._id })
 
-      const loginUrl = `${process.env.NEXTAUTH_URL ?? "http://localhost:3000"}/auth/signin`
-
       try {
         await sendMail(
           adminEmail,
@@ -77,6 +78,37 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
         // Email failure is non-fatal — admin account is still created
         console.error("[mailer] Failed to send credentials email:", mailErr)
       }
+    } else {
+      // Self-applied school — the admin already chose their own password, just let them know they can sign in.
+      const adminUser = await User.findById(existingAdmin.userId).select("email").lean()
+      if (adminUser) {
+        try {
+          await sendMail(
+            adminUser.email,
+            `${school.name} has been approved on TSMS`,
+            approvedNoCredentialsEmail({
+              title: `Your application for ${school.name} has been approved. You can now sign in with the email and password you chose.`,
+              loginUrl,
+            })
+          )
+        } catch (mailErr) {
+          console.error("[mailer] Failed to send approval email:", mailErr)
+        }
+      }
+    }
+  }
+
+  if (justRejected) {
+    try {
+      await sendMail(
+        school.email,
+        `Your TSMS application for ${school.name} was not approved`,
+        applicationRejectedEmail({
+          title: `Your application to register ${school.name} on TSMS was not approved. Please contact the platform administrator for more information.`,
+        })
+      )
+    } catch (mailErr) {
+      console.error("[mailer] Failed to send rejection email:", mailErr)
     }
   }
 

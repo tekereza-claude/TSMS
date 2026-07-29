@@ -17,6 +17,7 @@ import {
   DocumentArrowDownIcon,
   EyeIcon,
   ShieldExclamationIcon,
+  BellIcon,
 } from "@heroicons/react/24/outline"
 import LanguageToggle from "@/components/LanguageToggle"
 
@@ -380,6 +381,30 @@ export default function TeacherDashboard() {
   const [dataLoading, setDataLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
 
+  // Notifications (real, persisted via /api/notifications)
+  interface NotificationItem { _id: string; title: string; body: string; read: boolean; createdAt: string }
+  const [notifications, setNotifications] = useState<NotificationItem[]>([])
+  const [unreadNotifCount, setUnreadNotifCount] = useState(0)
+
+  const loadNotifications = useCallback(() => {
+    fetch("/api/notifications")
+      .then((r) => (r.ok ? r.json() : { notifications: [], unreadCount: 0 }))
+      .then((data) => {
+        setNotifications(Array.isArray(data.notifications) ? data.notifications : [])
+        setUnreadNotifCount(data.unreadCount ?? 0)
+      })
+      .catch(() => {})
+  }, [])
+
+  const markAllNotificationsRead = async () => {
+    try {
+      await fetch("/api/notifications/mark-all-read", { method: "PATCH" })
+      loadNotifications()
+    } catch {
+      // non-critical
+    }
+  }
+
   // Discipline entry form
   const [discForm, setDiscForm] = useState({ studentId: "", type: "Merit", category: "", points: "3", note: "", date: "", actionTaken: "" })
   const [discSubmitting, setDiscSubmitting] = useState(false)
@@ -417,6 +442,10 @@ export default function TeacherDashboard() {
     if (status === "authenticated" && session?.user.role === "TEACHER") loadData()
   }, [status, session?.user.role, loadData])
 
+  useEffect(() => {
+    if (status === "authenticated" && session?.user.role === "TEACHER") loadNotifications()
+  }, [status, session?.user.role, loadNotifications])
+
   // Default the template subject to the first one available once subjects load
   useEffect(() => {
     if (!templateSubjectId && subjects.length > 0) setTemplateSubjectId(subjects[0].id)
@@ -428,7 +457,8 @@ export default function TeacherDashboard() {
     { id: "marks", label: "Marks", icon: BookOpenIcon },
     { id: "upload", label: "Upload Marks", icon: ArrowUpTrayIcon },
     { id: "discipline", label: "Discipline", icon: ShieldExclamationIcon },
-  ]
+    { id: "notifications", label: "Notifications", icon: BellIcon, badge: unreadNotifCount },
+  ] as const
 
   const submitDiscipline = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -667,6 +697,11 @@ export default function TeacherDashboard() {
                   >
                     <Icon className="mr-3 h-5 w-5" />
                     {item.label}
+                    {"badge" in item && item.badge > 0 && (
+                      <span className="ml-auto bg-white text-indigo-700 text-xs font-bold px-1.5 py-0.5 rounded-full">
+                        {item.badge}
+                      </span>
+                    )}
                   </button>
                 )
               })}
@@ -1366,6 +1401,36 @@ export default function TeacherDashboard() {
                         </tbody>
                       </table>
                     </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* ── Notifications ── */}
+            {activeSection === "notifications" && (
+              <div className="space-y-6">
+                <div className="flex justify-between items-center">
+                  <h3 className="text-2xl font-bold text-gray-900">Notifications</h3>
+                  {unreadNotifCount > 0 && (
+                    <button onClick={markAllNotificationsRead} className="px-3 py-1.5 text-xs font-medium text-indigo-600 bg-indigo-50 rounded-md hover:bg-indigo-100 transition-colors">
+                      Mark all read
+                    </button>
+                  )}
+                </div>
+                <div className="bg-white rounded-xl shadow-sm border border-gray-200 divide-y divide-gray-100">
+                  {notifications.length === 0 ? (
+                    <p className="text-center text-sm text-gray-400 py-12">No notifications yet.</p>
+                  ) : (
+                    notifications.map((n) => (
+                      <div key={n._id} className={`px-6 py-4 flex gap-3 ${!n.read ? "bg-indigo-50/50" : ""}`}>
+                        {!n.read && <span className="mt-1.5 h-2 w-2 rounded-full bg-indigo-500 flex-shrink-0" />}
+                        <div className={!n.read ? "" : "pl-5"}>
+                          <p className="text-sm font-medium text-gray-900">{n.title}</p>
+                          <p className="text-sm text-gray-600 mt-0.5">{n.body}</p>
+                          <p className="text-xs text-gray-400 mt-1">{new Date(n.createdAt).toLocaleString()}</p>
+                        </div>
+                      </div>
+                    ))
                   )}
                 </div>
               </div>

@@ -42,6 +42,7 @@ interface Student {
   className: string
   joinedDate: string
   profilePicture?: string   // base64 data URL
+  admissionCode: string
 }
 
 interface Class {
@@ -77,6 +78,7 @@ interface RawStudent {
   email?: string
   classId?: { _id: string; name?: string } | string | null
   profilePicture?: string
+  admissionCode: string
   createdAt?: string
 }
 interface RawClass {
@@ -136,6 +138,7 @@ function normalizeStudent(s: RawStudent): Student {
     className: cls?.name ?? "Unassigned",
     joinedDate: shortDate(s.createdAt),
     profilePicture: s.profilePicture,
+    admissionCode: s.admissionCode,
   }
 }
 
@@ -169,6 +172,7 @@ interface Parent {
   phone: string
   students: { id: string; firstName: string; lastName: string }[]
   joinedDate: string
+  status: "PENDING" | "APPROVED" | "REJECTED"
 }
 
 interface RawParent {
@@ -176,6 +180,7 @@ interface RawParent {
   userId: RawUser | null
   studentIds: { _id: string; firstName: string; lastName: string }[]
   phone?: string
+  status?: "PENDING" | "APPROVED" | "REJECTED"
   createdAt?: string
 }
 
@@ -187,6 +192,7 @@ function normalizeParent(p: RawParent): Parent {
     phone: p.phone ?? "",
     students: (p.studentIds ?? []).map((s) => ({ id: String(s._id), firstName: s.firstName, lastName: s.lastName })),
     joinedDate: shortDate(p.userId?.createdAt ?? p.createdAt),
+    status: p.status ?? "APPROVED",
   }
 }
 
@@ -239,6 +245,7 @@ export default function SchoolAdminDashboard() {
     parentId?: { userId?: { name?: string; email?: string } }
   }
   const [parents, setParents] = useState<Parent[]>([])
+  const [parentTab, setParentTab] = useState<"PENDING" | "APPROVED">("PENDING")
   const [messages, setMessages] = useState<MessageItem[]>([])
   const [messagesLoading, setMessagesLoading] = useState(false)
   const [replyText, setReplyText] = useState<Record<string, string>>({})
@@ -464,6 +471,23 @@ export default function SchoolAdminDashboard() {
     }
   }
 
+  const patchParentStatus = async (id: string, status: "APPROVED" | "REJECTED") => {
+    try {
+      const res = await fetch(`/api/parents/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status }),
+      })
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}))
+        throw new Error(body.error || "Failed to update parent")
+      }
+      await loadData()
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Failed to update parent")
+    }
+  }
+
   const unreadCount = messages.filter((m) => m.status === "SENT").length
 
   const loadMessages = useCallback(async () => {
@@ -595,7 +619,10 @@ export default function SchoolAdminDashboard() {
   const filteredStudents = students.filter((s) => `${s.firstName} ${s.lastName}`.toLowerCase().includes(q) || (s.email || "").toLowerCase().includes(q))
   const filteredClasses = classes.filter((c) => c.name.toLowerCase().includes(q) || c.grade.toLowerCase().includes(q))
   const filteredSubjects = subjects.filter((s) => s.name.toLowerCase().includes(q) || s.code.toLowerCase().includes(q))
-  const filteredParents = parents.filter((p) => p.name.toLowerCase().includes(q) || p.email.toLowerCase().includes(q))
+  const filteredParents = parents
+    .filter((p) => (parentTab === "PENDING" ? p.status === "PENDING" : p.status !== "PENDING"))
+    .filter((p) => p.name.toLowerCase().includes(q) || p.email.toLowerCase().includes(q))
+  const pendingParentCount = parents.filter((p) => p.status === "PENDING").length
 
   if (status === "loading") {
     return (
@@ -871,6 +898,7 @@ export default function SchoolAdminDashboard() {
                         <tr className="border-b border-gray-200 bg-gray-50">
                           <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Student</th>
                           <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Class</th>
+                          <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Admission Code</th>
                           <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Joined</th>
                           <th className="px-6 py-3 text-right text-xs font-semibold text-gray-600 uppercase tracking-wider">Actions</th>
                         </tr>
@@ -893,6 +921,9 @@ export default function SchoolAdminDashboard() {
                             <td className="px-6 py-4">
                               <span className="inline-flex px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">{s.className}</span>
                             </td>
+                            <td className="px-6 py-4">
+                              <code className="text-xs font-mono bg-gray-100 px-2 py-1 rounded">{s.admissionCode}</code>
+                            </td>
                             <td className="px-6 py-4 text-sm text-gray-500">{s.joinedDate}</td>
                             <td className="px-6 py-4 text-right">
                               <div className="flex items-center justify-end space-x-2">
@@ -904,7 +935,7 @@ export default function SchoolAdminDashboard() {
                           </tr>
                         ))}
                         {filteredStudents.length === 0 && (
-                          <tr><td colSpan={4} className="px-6 py-8 text-center text-sm text-gray-400">No students found.</td></tr>
+                          <tr><td colSpan={5} className="px-6 py-8 text-center text-sm text-gray-400">No students found.</td></tr>
                         )}
                       </tbody>
                     </table>
@@ -1034,7 +1065,21 @@ export default function SchoolAdminDashboard() {
                   </button>
                 </div>
 
-                <div className="bg-white rounded-lg shadow p-4">
+                <div className="bg-white rounded-lg shadow p-4 space-y-4">
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => setParentTab("PENDING")}
+                      className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${parentTab === "PENDING" ? "bg-green-600 text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200"}`}
+                    >
+                      Pending Applications{pendingParentCount > 0 ? ` (${pendingParentCount})` : ""}
+                    </button>
+                    <button
+                      onClick={() => setParentTab("APPROVED")}
+                      className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${parentTab === "APPROVED" ? "bg-green-600 text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200"}`}
+                    >
+                      Approved
+                    </button>
+                  </div>
                   <div className="relative">
                     <MagnifyingGlassIcon className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-400" />
                     <input type="text" placeholder="Search parents..." value={search} onChange={(e) => setSearch(e.target.value)}
@@ -1050,6 +1095,9 @@ export default function SchoolAdminDashboard() {
                           <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Parent</th>
                           <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Phone</th>
                           <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Linked Students</th>
+                          {parentTab === "APPROVED" && (
+                            <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Status</th>
+                          )}
                           <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Joined</th>
                           <th className="px-6 py-3 text-right text-xs font-semibold text-gray-600 uppercase tracking-wider">Actions</th>
                         </tr>
@@ -1076,14 +1124,30 @@ export default function SchoolAdminDashboard() {
                                 )) : <span className="text-xs text-gray-400">None</span>}
                               </div>
                             </td>
+                            {parentTab === "APPROVED" && (
+                              <td className="px-6 py-4">
+                                <span className={`inline-flex px-2.5 py-0.5 rounded-full text-xs font-medium ${p.status === "APPROVED" ? "bg-emerald-100 text-emerald-800" : "bg-red-100 text-red-800"}`}>{p.status}</span>
+                              </td>
+                            )}
                             <td className="px-6 py-4 text-sm text-gray-500">{p.joinedDate}</td>
                             <td className="px-6 py-4 text-right">
-                              <button onClick={() => removeItem("parents", p.id, p.name)} className="px-3 py-1 text-xs font-medium text-red-600 bg-red-50 rounded-md hover:bg-red-100 transition-colors">Remove</button>
+                              <div className="flex items-center justify-end space-x-2">
+                                {p.status === "PENDING" && (
+                                  <>
+                                    <button onClick={() => patchParentStatus(p.id, "APPROVED")} className="px-3 py-1 text-xs font-medium text-green-600 bg-green-50 rounded-md hover:bg-green-100 transition-colors">Approve</button>
+                                    <button onClick={() => patchParentStatus(p.id, "REJECTED")} className="px-3 py-1 text-xs font-medium text-red-600 bg-red-50 rounded-md hover:bg-red-100 transition-colors">Reject</button>
+                                  </>
+                                )}
+                                {p.status === "REJECTED" && (
+                                  <button onClick={() => patchParentStatus(p.id, "APPROVED")} className="px-3 py-1 text-xs font-medium text-green-600 bg-green-50 rounded-md hover:bg-green-100 transition-colors">Approve</button>
+                                )}
+                                <button onClick={() => removeItem("parents", p.id, p.name)} className="px-3 py-1 text-xs font-medium text-red-600 bg-red-50 rounded-md hover:bg-red-100 transition-colors">Remove</button>
+                              </div>
                             </td>
                           </tr>
                         ))}
                         {filteredParents.length === 0 && (
-                          <tr><td colSpan={5} className="px-6 py-8 text-center text-sm text-gray-400">No parents found.</td></tr>
+                          <tr><td colSpan={parentTab === "APPROVED" ? 6 : 5} className="px-6 py-8 text-center text-sm text-gray-400">{parentTab === "PENDING" ? "No pending applications." : "No parents found."}</td></tr>
                         )}
                       </tbody>
                     </table>
