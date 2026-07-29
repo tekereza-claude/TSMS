@@ -1,0 +1,6 @@
+1. signing up for users.
+2. forgot password functionality.
+3. we must make sure that a parent can exist with more than 1 child.
+4. Phone number on parent should be there too
+5. Marks approval before they reach to parents, the flow has to be from teacher to school admin, approve them then next to a parents
+6. Text msg for all users. teachers and parents
