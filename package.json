@@ -8,7 +8,8 @@
     "start": "next start -p 3001",
     "lint": "eslint",
     "db:seed": "ts-node --project src/scripts/tsconfig.json src/scripts/seed.ts",
-    "db:migrate-comments": "ts-node --project src/scripts/tsconfig.json src/scripts/migrate-comments-to-messages.ts"
+    "db:migrate-comments": "ts-node --project src/scripts/tsconfig.json src/scripts/migrate-comments-to-messages.ts",
+    "db:seed-careers": "ts-node --project src/scripts/tsconfig.json src/scripts/seed-career-clusters.ts"
   },
   "dependencies": {
     "@google/generative-ai": "^0.24.1",

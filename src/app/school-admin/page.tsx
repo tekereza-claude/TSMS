@@ -258,7 +258,7 @@ export default function SchoolAdminDashboard() {
   const [messageSending, setMessageSending] = useState(false)
   const [showComposeModal, setShowComposeModal] = useState(false)
   const [composeRole, setComposeRole] = useState<"PARENT" | "TEACHER">("PARENT")
-  const [composeTargetId, setComposeTargetId] = useState("")
+  const [composeTargetIds, setComposeTargetIds] = useState<string[]>([])
   const [composeText, setComposeText] = useState("")
   const [composeSending, setComposeSending] = useState(false)
   const [composeError, setComposeError] = useState("")
@@ -580,27 +580,43 @@ export default function SchoolAdminDashboard() {
     }
   }
 
+  const composeCandidates = composeRole === "PARENT" ? parents.filter((p) => p.status === "APPROVED") : teachers
+
+  const toggleComposeTarget = (id: string) =>
+    setComposeTargetIds((ids) => (ids.includes(id) ? ids.filter((x) => x !== id) : [...ids, id]))
+
+  const toggleSelectAllComposeTargets = () =>
+    setComposeTargetIds((ids) =>
+      ids.length === composeCandidates.length ? [] : composeCandidates.map((c) => c.id)
+    )
+
   const submitCompose = async () => {
     const text = composeText.trim()
-    if (!text || !composeTargetId) return
+    if (!text || composeTargetIds.length === 0) return
     setComposeSending(true)
     setComposeError("")
     try {
       const res = await fetch("/api/conversations", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: text, toRole: composeRole, toId: composeTargetId }),
+        body: JSON.stringify({ message: text, toRole: composeRole, toIds: composeTargetIds }),
       })
       if (!res.ok) {
         const body = await res.json().catch(() => ({}))
         throw new Error(body.error || "Failed to send message")
       }
-      const { conversation } = await res.json()
+      const { sentCount, conversations: sentConversations, failed } = await res.json()
       setShowComposeModal(false)
       setComposeText("")
-      setComposeTargetId("")
+      setComposeTargetIds([])
       await loadConversations()
-      await selectConversation(conversation._id)
+      if (sentCount === 1) {
+        const conv = sentConversations[0] as { _id: string }
+        await selectConversation(conv._id)
+      }
+      if (failed?.length > 0) {
+        alert(`Sent to ${sentCount}, but failed for ${failed.length} recipient(s).`)
+      }
     } catch (err) {
       setComposeError(err instanceof Error ? err.message : "Failed to send message")
     } finally {
@@ -1375,7 +1391,7 @@ export default function SchoolAdminDashboard() {
                   </div>
                   <div className="flex items-center gap-3">
                     <button
-                      onClick={() => { setShowComposeModal(true); setComposeError(""); setComposeTargetId("") }}
+                      onClick={() => { setShowComposeModal(true); setComposeError(""); setComposeTargetIds([]) }}
                       className="inline-flex items-center px-3 py-1.5 text-sm font-medium text-white bg-green-600 rounded-lg hover:bg-green-700 transition-colors"
                     >
                       <PlusCircleIcon className="h-4 w-4 mr-1.5" />
@@ -1926,7 +1942,7 @@ export default function SchoolAdminDashboard() {
                     <button
                       key={r}
                       type="button"
-                      onClick={() => { setComposeRole(r); setComposeTargetId("") }}
+                      onClick={() => { setComposeRole(r); setComposeTargetIds([]) }}
                       className={`flex-1 px-3 py-2 text-sm font-medium rounded-lg border transition-colors ${
                         composeRole === r ? "bg-green-600 text-white border-green-600" : "bg-white text-gray-700 border-gray-300 hover:bg-gray-50"
                       }`}
@@ -1937,23 +1953,46 @@ export default function SchoolAdminDashboard() {
                 </div>
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  {composeRole === "PARENT" ? "Parent" : "Teacher"}
-                </label>
-                <select
-                  value={composeTargetId}
-                  onChange={(e) => setComposeTargetId(e.target.value)}
-                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-green-500"
-                >
-                  <option value="">Select…</option>
-                  {composeRole === "PARENT"
-                    ? parents.filter((p) => p.status === "APPROVED").map((p) => (
-                        <option key={p.id} value={p.id}>{p.name}{p.email ? ` (${p.email})` : ""}</option>
-                      ))
-                    : teachers.map((t) => (
-                        <option key={t.id} value={t.id}>{t.name}{t.email ? ` (${t.email})` : ""}</option>
-                      ))}
-                </select>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-sm font-medium text-gray-700">
+                    {composeRole === "PARENT" ? "Parents" : "Teachers"}
+                    {composeTargetIds.length > 0 && (
+                      <span className="ml-1.5 text-xs font-normal text-gray-500">({composeTargetIds.length} selected)</span>
+                    )}
+                  </label>
+                  {composeCandidates.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={toggleSelectAllComposeTargets}
+                      className="text-xs font-medium text-green-700 hover:underline"
+                    >
+                      {composeTargetIds.length === composeCandidates.length ? "Clear all" : `Select all (${composeCandidates.length})`}
+                    </button>
+                  )}
+                </div>
+                {composeCandidates.length === 0 ? (
+                  <p className="text-sm text-gray-400">No {composeRole === "PARENT" ? "parents" : "teachers"} available.</p>
+                ) : (
+                  <div className="max-h-48 overflow-y-auto border border-gray-200 rounded-lg divide-y divide-gray-100">
+                    {composeCandidates.map((c) => {
+                      const checked = composeTargetIds.includes(c.id)
+                      return (
+                        <label
+                          key={c.id}
+                          className={`flex items-center gap-3 px-3 py-2 text-sm cursor-pointer ${checked ? "bg-green-50" : "hover:bg-gray-50"}`}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={() => toggleComposeTarget(c.id)}
+                            className="h-4 w-4 text-green-600 border-gray-300 rounded focus:ring-green-500"
+                          />
+                          <span className="text-gray-900">{c.name}{c.email ? ` (${c.email})` : ""}</span>
+                        </label>
+                      )
+                    })}
+                  </div>
+                )}
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Message</label>
@@ -1971,7 +2010,7 @@ export default function SchoolAdminDashboard() {
               <button onClick={() => setShowComposeModal(false)} className="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors">Cancel</button>
               <button
                 onClick={submitCompose}
-                disabled={composeSending || !composeTargetId || !composeText.trim()}
+                disabled={composeSending || composeTargetIds.length === 0 || !composeText.trim()}
                 className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {composeSending ? "Sending…" : "Send"}

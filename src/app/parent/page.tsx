@@ -224,14 +224,19 @@ interface CareerRecommendation {
   topSubjects: string[]   // the matching subjects that drove this
 }
 
+// Subject names are freeform per school, so match case/whitespace-insensitively
+// rather than requiring an exact string match against the reference data.
+const normSubj = (s: string) => s.trim().toLowerCase()
+
 function computeCareerRecommendations(marks: Mark[], clusters: CareerCluster[]): CareerRecommendation[] {
   if (marks.length === 0 || clusters.length === 0) return []
 
   // Build subject → average score map across all terms
   const subjectMap: Record<string, number[]> = {}
   for (const m of marks) {
-    if (!subjectMap[m.subject]) subjectMap[m.subject] = []
-    subjectMap[m.subject].push((m.score / m.maxScore) * 100)
+    const key = normSubj(m.subject)
+    if (!subjectMap[key]) subjectMap[key] = []
+    subjectMap[key].push((m.score / m.maxScore) * 100)
   }
   const subjectAvg: Record<string, number> = {}
   for (const [subj, scores] of Object.entries(subjectMap)) {
@@ -242,12 +247,12 @@ function computeCareerRecommendations(marks: Mark[], clusters: CareerCluster[]):
 
   for (const cluster of clusters) {
     // Find which of this cluster's subjects the student actually has marks for
-    const matched = cluster.subjects.filter((s) => subjectAvg[s] !== undefined)
+    const matched = cluster.subjects.filter((s) => subjectAvg[normSubj(s)] !== undefined)
     if (matched.length === 0) continue
 
     // Average score across matched subjects
     const clusterAvg = Math.round(
-      matched.reduce((sum, s) => sum + subjectAvg[s], 0) / matched.length
+      matched.reduce((sum, s) => sum + subjectAvg[normSubj(s)], 0) / matched.length
     )
 
     if (clusterAvg < cluster.minScore) continue
@@ -259,7 +264,7 @@ function computeCareerRecommendations(marks: Mark[], clusters: CareerCluster[]):
     results.push({
       cluster,
       matchScore,
-      topSubjects: matched.sort((a, b) => subjectAvg[b] - subjectAvg[a]),
+      topSubjects: matched.sort((a, b) => subjectAvg[normSubj(b)] - subjectAvg[normSubj(a)]),
     })
   }
 
