@@ -10,6 +10,13 @@ interface SchoolOption {
   name: string
 }
 
+interface StudentOption {
+  _id: string
+  firstName: string
+  lastName: string
+  classId?: { name?: string; grade?: string } | null
+}
+
 export default function ApplyParent() {
   const { t } = useLanguage()
   const [schools, setSchools] = useState<SchoolOption[]>([])
@@ -20,7 +27,9 @@ export default function ApplyParent() {
     parentPassword: "",
     parentPhone: "",
   })
-  const [admissionCodes, setAdmissionCodes] = useState<string[]>([""])
+  const [students, setStudents] = useState<StudentOption[]>([])
+  const [studentsLoading, setStudentsLoading] = useState(false)
+  const [selectedStudentIds, setSelectedStudentIds] = useState<string[]>([])
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState("")
   const [submitted, setSubmitted] = useState(false)
@@ -32,11 +41,25 @@ export default function ApplyParent() {
       .catch(() => setSchools([]))
   }, [])
 
+  useEffect(() => {
+    setSelectedStudentIds([])
+    if (!form.schoolId) {
+      setStudents([])
+      return
+    }
+    setStudentsLoading(true)
+    fetch(`/api/students/public?schoolId=${form.schoolId}`)
+      .then((res) => res.json())
+      .then((data: StudentOption[]) => setStudents(Array.isArray(data) ? data : []))
+      .catch(() => setStudents([]))
+      .finally(() => setStudentsLoading(false))
+  }, [form.schoolId])
+
   const update = (key: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
     setForm((f) => ({ ...f, [key]: e.target.value }))
 
-  const updateCode = (index: number) => (e: React.ChangeEvent<HTMLInputElement>) =>
-    setAdmissionCodes((codes) => codes.map((c, i) => (i === index ? e.target.value : c)))
+  const toggleStudent = (id: string) =>
+    setSelectedStudentIds((ids) => (ids.includes(id) ? ids.filter((x) => x !== id) : [...ids, id]))
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -47,7 +70,7 @@ export default function ApplyParent() {
       const res = await fetch("/api/auth/apply/parent", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...form, admissionCodes }),
+        body: JSON.stringify({ ...form, studentIds: selectedStudentIds }),
       })
       const body = await res.json()
       if (!res.ok) {
@@ -126,31 +149,36 @@ export default function ApplyParent() {
             <hr className="border-gray-200" />
 
             <div className="space-y-2">
-              {admissionCodes.map((code, i) => (
-                <div key={i} className="flex gap-2">
-                  <input
-                    type="text" required placeholder={t.admissionCodePlaceholder}
-                    value={code} onChange={updateCode(i)}
-                    className="appearance-none relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
-                  />
-                  {admissionCodes.length > 1 && (
-                    <button
-                      type="button"
-                      onClick={() => setAdmissionCodes((codes) => codes.filter((_, idx) => idx !== i))}
-                      className="px-3 py-1 text-xs font-medium text-red-600 bg-red-50 rounded-md hover:bg-red-100"
-                    >
-                      {t.removeChild}
-                    </button>
-                  )}
+              <p className="text-sm font-medium text-gray-700">{t.selectChildrenLabel}</p>
+
+              {!form.schoolId ? (
+                <p className="text-sm text-gray-400">{t.selectSchoolFirstHint}</p>
+              ) : studentsLoading ? (
+                <p className="text-sm text-gray-400">{t.loadingStudents}</p>
+              ) : students.length === 0 ? (
+                <p className="text-sm text-gray-400">{t.noStudentsAvailable}</p>
+              ) : (
+                <div className="max-h-56 overflow-y-auto border border-gray-200 rounded-md divide-y divide-gray-100">
+                  {students.map((s) => {
+                    const checked = selectedStudentIds.includes(s._id)
+                    const classLabel = s.classId?.name ? ` · ${s.classId.name}` : ""
+                    return (
+                      <label
+                        key={s._id}
+                        className={`flex items-center gap-3 px-3 py-2 text-sm cursor-pointer ${checked ? "bg-blue-50" : "hover:bg-gray-50"}`}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={() => toggleStudent(s._id)}
+                          className="h-4 w-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                        />
+                        <span className="text-gray-900">{s.firstName} {s.lastName}{classLabel}</span>
+                      </label>
+                    )
+                  })}
                 </div>
-              ))}
-              <button
-                type="button"
-                onClick={() => setAdmissionCodes((codes) => [...codes, ""])}
-                className="text-sm font-medium text-blue-600 hover:text-blue-500"
-              >
-                + {t.addAnotherChild}
-              </button>
+              )}
             </div>
 
             <button

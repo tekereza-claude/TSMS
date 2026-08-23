@@ -10,26 +10,31 @@ import { hashPassword } from "@/lib/password"
 export async function POST(req: NextRequest) {
   await connectDB()
 
-  const { schoolId, parentName, parentEmail, parentPassword, parentPhone, admissionCodes } = await req.json()
+  const { schoolId, parentName, parentEmail, parentPassword, parentPhone, studentIds } = await req.json()
 
   if (!schoolId) return err("Please select your child's school")
   if (!parentName || !parentEmail || !parentPassword) return err("Your name, email and password are required")
   if (!parentPhone) return err("Phone is required")
   if (parentPassword.length < 8) return err("Password must be at least 8 characters")
 
-  const codes: string[] = Array.isArray(admissionCodes)
-    ? admissionCodes.map((c: string) => c.trim().toUpperCase()).filter(Boolean)
-    : []
-  if (codes.length === 0) return err("At least one admission code is required")
+  const ids: string[] = Array.isArray(studentIds) ? [...new Set(studentIds.filter(Boolean))] : []
+  if (ids.length === 0) return err("Please select at least one child")
 
   const school = await School.findById(schoolId).select("status").lean()
   if (!school || school.status !== "APPROVED") return err("School not found", 404)
 
-  const students = await Student.find({ admissionCode: { $in: codes }, schoolId }).select("_id admissionCode").lean()
-  if (students.length !== codes.length) {
-    const found = new Set(students.map((s) => s.admissionCode))
-    const missing = codes.filter((c) => !found.has(c))
-    return err(`Admission code(s) not found at this school: ${missing.join(", ")}`, 404)
+  // Re-verify against race conditions: a student may have been claimed by another
+  // application since the picker was loaded.
+  const linkedStudentIds = await Parent.distinct("studentIds", { status: { $in: ["PENDING", "APPROVED"] } })
+  const linked = new Set(linkedStudentIds.map(String))
+
+  const students = await Student.find({ _id: { $in: ids }, schoolId }).select("_id firstName lastName").lean()
+  if (students.length !== ids.length) {
+    return err("One or more selected children could not be found at this school", 404)
+  }
+  const alreadyLinked = students.filter((s) => linked.has(String(s._id)))
+  if (alreadyLinked.length > 0) {
+    return err(`Already linked to another parent: ${alreadyLinked.map((s) => `${s.firstName} ${s.lastName}`).join(", ")}`, 409)
   }
 
   const parentEmailLower = parentEmail.toLowerCase()

@@ -1,8 +1,9 @@
 "use client"
 
-import { useSession, signOut } from "next-auth/react"
+import { useSession } from "next-auth/react"
 import { useRouter } from "next/navigation"
 import { useEffect, useState, useCallback, type ChangeEvent } from "react"
+import { signOutToHome } from "@/lib/auth-client"
 import {
   AcademicCapIcon,
   UserGroupIcon,
@@ -23,6 +24,7 @@ import {
 } from "@heroicons/react/24/outline"
 import LanguageToggle from "@/components/LanguageToggle"
 import MessageThread, { type ThreadMessage } from "@/components/messaging/MessageThread"
+import { TERM_ORDER } from "@/lib/terms"
 import ConversationList, { type ConversationSummary, isUnread } from "@/components/messaging/ConversationList"
 
 // ─── UI Types (flat shapes the components render) ──────────────────────────────
@@ -263,6 +265,34 @@ export default function SchoolAdminDashboard() {
 
   const [dataLoading, setDataLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
+
+  // Current term — school-wide setting that progressively unlocks terms platform-wide
+  const [currentTerm, setCurrentTerm] = useState<string>("Term 1")
+  const [termSaving, setTermSaving] = useState(false)
+
+  useEffect(() => {
+    if (status !== "authenticated") return
+    fetchJson("/api/schools/me")
+      .then((s) => setCurrentTerm(s?.currentTerm || "Term 1"))
+      .catch(() => {})
+  }, [status])
+
+  const changeCurrentTerm = async (term: string) => {
+    setTermSaving(true)
+    try {
+      const res = await fetch("/api/schools/me", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ currentTerm: term }),
+      })
+      if (res.ok) {
+        const s = await res.json()
+        setCurrentTerm(s.currentTerm)
+      }
+    } finally {
+      setTermSaving(false)
+    }
+  }
 
   const handleAvatarChange = (e: ChangeEvent<HTMLInputElement>, setter: (v: string) => void) => {
     const file = e.target.files?.[0]
@@ -744,6 +774,20 @@ export default function SchoolAdminDashboard() {
               </div>
             </div>
             <div className="flex items-center space-x-3">
+              <div className="flex items-center gap-1.5">
+                <label htmlFor="currentTermSelect" className="text-xs font-medium text-gray-500">Current Term</label>
+                <select
+                  id="currentTermSelect"
+                  value={currentTerm}
+                  disabled={termSaving}
+                  onChange={(e) => changeCurrentTerm(e.target.value)}
+                  className="rounded-lg border border-gray-300 px-2 py-1.5 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-green-500 disabled:opacity-50"
+                >
+                  {TERM_ORDER.map((t) => (
+                    <option key={t} value={t}>{t}</option>
+                  ))}
+                </select>
+              </div>
               <LanguageToggle />
               <button
                 onClick={() => {
@@ -800,7 +844,7 @@ export default function SchoolAdminDashboard() {
             </nav>
             <div className="p-4 border-t border-green-700">
               <button
-                onClick={() => signOut({ callbackUrl: "/" })}
+                onClick={() => signOutToHome()}
                 className="flex w-full items-center px-3 py-2 text-sm font-medium text-white rounded-lg hover:bg-red-500 transition-colors"
               >
                 <ArrowRightOnRectangleIcon className="mr-3 h-5 w-5" />

@@ -4,25 +4,13 @@ import { connectDB } from "@/lib/mongoose"
 import { requireRole, ok, err } from "@/lib/api-helpers"
 import { UserRole } from "@/types"
 import { notifyUser } from "@/lib/notify"
+import { resolveOwnSchoolId } from "@/lib/school"
 import Conversation from "@/models/Conversation"
 import Message from "@/models/Message"
 import Parent from "@/models/Parent"
 import Teacher from "@/models/Teacher"
 import Student from "@/models/Student"
 import SchoolAdmin from "@/models/SchoolAdmin"
-
-// Resolves the school a PARENT or TEACHER belongs to, for their one conversation with the admin.
-async function resolveOwnSchoolId(role: UserRole, userId: string) {
-  if (role === UserRole.TEACHER) {
-    const teacher = await Teacher.findOne({ userId }).select("schoolId").lean()
-    return teacher?.schoolId ?? null
-  }
-  // PARENT — derive from their first linked child, matching the old /api/comments behavior
-  const parent = await Parent.findOne({ userId }).select("studentIds").lean()
-  if (!parent?.studentIds?.length) return null
-  const child = await Student.findById(parent.studentIds[0]).select("schoolId").lean()
-  return child?.schoolId ?? null
-}
 
 // GET /api/conversations
 //  - PARENT / TEACHER → their single conversation with the school admin, messages embedded

@@ -6,8 +6,10 @@ import Student from "@/models/Student"
 import Subject from "@/models/Subject"
 import Class from "@/models/Class"
 import Parent from "@/models/Parent"
+import School from "@/models/School"
 import { requireRole, ok, err } from "@/lib/api-helpers"
 import { UserRole } from "@/types"
+import { availableTerms } from "@/lib/terms"
 
 export async function GET(req: NextRequest) {
   const { error, session } = await requireRole(
@@ -99,6 +101,14 @@ export async function POST(req: NextRequest) {
 
   const teacher = await Teacher.findOne({ userId: session!.user.id }).lean()
   if (!teacher) return err("Teacher record not found", 404)
+
+  // A teacher may only submit marks for a term the school has actually opened
+  const school = await School.findById(teacher.schoolId).select("currentTerm").lean()
+  const openTerms = availableTerms(school?.currentTerm)
+  const notOpenYet = records.filter((r) => !openTerms.includes(r.term as (typeof openTerms)[number]))
+  if (notOpenYet.length > 0) {
+    return err(`${notOpenYet.length} record(s) are for a term not open yet — current term is ${school?.currentTerm ?? "Term 1"}`, 422)
+  }
 
   // A teacher may only submit marks for students in the classes assigned to them
   const classes = await Class.find({ teacherId: teacher._id }).select("_id").lean()

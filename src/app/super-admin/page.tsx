@@ -1,8 +1,9 @@
 "use client"
 
-import { useSession, signOut } from "next-auth/react"
+import { useSession } from "next-auth/react"
 import { useRouter } from "next/navigation"
 import { useEffect, useState, useCallback } from "react"
+import { signOutToHome } from "@/lib/auth-client"
 import {
   BuildingOfficeIcon,
   CurrencyDollarIcon,
@@ -180,7 +181,7 @@ export default function SuperAdminDashboard() {
     setShowEditModal(true)
   }
 
-  const handleSignOut = () => signOut({ callbackUrl: "/" })
+  const handleSignOut = () => signOutToHome()
 
   const menuItems = [
     { id: "overview", label: "Main Overview", icon: ChartBarIcon, href: "#overview" },

@@ -1,8 +1,9 @@
 "use client"
 
-import { useSession, signOut } from "next-auth/react"
+import { useSession } from "next-auth/react"
 import { useRouter } from "next/navigation"
 import { useEffect, useState, useRef, useCallback } from "react"
+import { signOutToHome } from "@/lib/auth-client"
 import {
   AcademicCapIcon,
   UserGroupIcon,
@@ -22,6 +23,7 @@ import {
 } from "@heroicons/react/24/outline"
 import LanguageToggle from "@/components/LanguageToggle"
 import MessageThread, { type ThreadMessage } from "@/components/messaging/MessageThread"
+import { availableTerms } from "@/lib/terms"
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -211,6 +213,7 @@ function validateAndParseCSV(
   text: string,
   validStudentNames: string[],
   validSubjects: string[],
+  openTerms: string[],
 ): { rows: ParsedRow[]; globalErrors: string[] } {
   const globalErrors: string[] = []
   // Normalise line endings (Excel on Windows saves CRLF) and strip a leading BOM,
@@ -286,12 +289,14 @@ function validateAndParseCSV(
       errors.push(`Exam must be between 0 and ${EXAM_MAX}`)
     }
 
-    // Term must be valid (case-insensitive)
+    // Term must be valid (case-insensitive), and open for submissions
     const termNormalised = VALID_TERMS.find((t) => t.toLowerCase() === term.toLowerCase()) ?? term
     if (!term) {
       errors.push("Term is required")
     } else if (!VALID_TERMS.find((t) => t.toLowerCase() === term.toLowerCase())) {
       errors.push(`Term must be one of: ${VALID_TERMS.join(", ")}`)
+    } else if (!openTerms.includes(termNormalised)) {
+      errors.push(`${termNormalised} is not open yet — current term is ${openTerms[openTerms.length - 1]}`)
     }
 
     // Year must be a 4-digit year
@@ -388,6 +393,10 @@ export default function TeacherDashboard() {
   const [discRecords, setDiscRecords] = useState<DisciplineItem[]>([])
   const [dataLoading, setDataLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
+
+  // Current term — set by the school admin; only terms up to it are open for new uploads
+  const [currentTerm, setCurrentTerm] = useState("Term 1")
+  const openTerms = availableTerms(currentTerm)
 
   // Notifications (real, persisted via /api/notifications)
   interface NotificationItem { _id: string; title: string; body: string; read: boolean; createdAt: string }
@@ -494,6 +503,17 @@ export default function TeacherDashboard() {
   useEffect(() => {
     if (status === "authenticated" && session?.user.role === "TEACHER") loadConversation()
   }, [status, session?.user.role, loadConversation])
+
+  useEffect(() => {
+    if (status !== "authenticated" || session?.user.role !== "TEACHER") return
+    fetchJson("/api/schools/me")
+      .then((s) => {
+        const term = s?.currentTerm || "Term 1"
+        setCurrentTerm(term)
+        setTemplateTerm(term)
+      })
+      .catch(() => {})
+  }, [status, session?.user.role])
 
   useEffect(() => {
     if (activeSection !== "messages" || !conversation || !messagesUnread) return
@@ -629,7 +649,7 @@ export default function TeacherDashboard() {
       const text = ev.target?.result as string
       const validStudentNames = students.map((s) => `${s.firstName} ${s.lastName}`)
       const validSubjectNames = subjects.map((s) => s.name)
-      const { rows, globalErrors: gErr } = validateAndParseCSV(text, validStudentNames, validSubjectNames)
+      const { rows, globalErrors: gErr } = validateAndParseCSV(text, validStudentNames, validSubjectNames, openTerms)
       setGlobalErrors(gErr)
       setParsedRows(rows)
       setUploadStep("preview")
@@ -766,7 +786,7 @@ export default function TeacherDashboard() {
             </nav>
             <div className="p-4 border-t border-indigo-700">
               <button
-                onClick={() => signOut({ callbackUrl: "/" })}
+                onClick={() => signOutToHome()}
                 className="flex w-full items-center px-3 py-2 text-sm font-medium text-white rounded-lg hover:bg-red-500 transition-colors"
               >
                 <ArrowRightOnRectangleIcon className="mr-3 h-5 w-5" />
@@ -1116,7 +1136,7 @@ export default function TeacherDashboard() {
                         onChange={(e) => setTemplateTerm(e.target.value)}
                         className="rounded-lg border border-indigo-300 bg-white px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-indigo-500"
                       >
-                        {VALID_TERMS.map((t) => (
+                        {openTerms.map((t) => (
                           <option key={t} value={t}>{t}</option>
                         ))}
                       </select>

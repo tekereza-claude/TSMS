@@ -1,8 +1,10 @@
 "use client"
 
-import { useSession, signOut } from "next-auth/react"
+import { useSession } from "next-auth/react"
 import { useRouter } from "next/navigation"
 import { useEffect, useState, useCallback } from "react"
+import { signOutToHome } from "@/lib/auth-client"
+import { availableTerms } from "@/lib/terms"
 import {
   AcademicCapIcon,
   ArrowRightOnRectangleIcon,
@@ -282,8 +284,6 @@ function avg(marks: Mark[]) {
   return Math.round(marks.reduce((a, m) => a + (m.score / m.maxScore) * 100, 0) / marks.length)
 }
 
-const TERMS = ["Term 1", "Term 2", "Term 3"]
-
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export default function ParentDashboard() {
@@ -294,6 +294,10 @@ export default function ParentDashboard() {
   const [selectedChild, setSelectedChild] = useState<Child | null>(null)
   const [selectedTerm, setSelectedTerm] = useState("Term 1")
   const [showChildDropdown, setShowChildDropdown] = useState(false)
+
+  // Current term — set by the school admin; only terms up to it are available to view
+  const [currentTerm, setCurrentTerm] = useState("Term 1")
+  const openTerms = availableTerms(currentTerm)
 
   // "My Profile" — self-service avatar for the logged-in parent
   const [showProfileModal, setShowProfileModal] = useState(false)
@@ -379,6 +383,14 @@ export default function ParentDashboard() {
     if (status !== "authenticated") return
     loadConversation()
   }, [status, loadConversation])
+
+  useEffect(() => {
+    if (status !== "authenticated") return
+    fetch("/api/schools/me")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((s) => setCurrentTerm(s?.currentTerm || "Term 1"))
+      .catch(() => {})
+  }, [status])
 
   const lastMessage = conversation?.messages[conversation.messages.length - 1]
   const messagesUnread = Boolean(
@@ -530,7 +542,7 @@ export default function ParentDashboard() {
             Your account isn&apos;t linked to any students. Please ask your school administrator to link your child to your account.
           </p>
           <button
-            onClick={() => signOut({ callbackUrl: "/" })}
+            onClick={() => signOutToHome()}
             className="px-4 py-2 bg-gray-100 text-gray-700 text-sm rounded-lg hover:bg-gray-200 transition-colors"
           >
             Sign Out
@@ -661,7 +673,7 @@ export default function ParentDashboard() {
 
             <div className="p-4 border-t border-rose-700">
               <button
-                onClick={() => signOut({ callbackUrl: "/" })}
+                onClick={() => signOutToHome()}
                 className="flex w-full items-center px-3 py-2 text-sm font-medium text-white rounded-lg hover:bg-red-500 transition-colors"
               >
                 <ArrowRightOnRectangleIcon className="mr-3 h-5 w-5" />
@@ -693,7 +705,7 @@ export default function ParentDashboard() {
                 </p>
               </div>
               <div className="flex items-center space-x-2">
-                {TERMS.map((t) => (
+                {openTerms.map((t) => (
                   <button
                     key={t}
                     onClick={() => setSelectedTerm(t)}
