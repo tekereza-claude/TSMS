@@ -18,10 +18,18 @@ import {
   EyeIcon,
   ShieldExclamationIcon,
   BellIcon,
+  ChatBubbleLeftRightIcon,
 } from "@heroicons/react/24/outline"
 import LanguageToggle from "@/components/LanguageToggle"
+import MessageThread, { type ThreadMessage } from "@/components/messaging/MessageThread"
 
 // ─── Types ───────────────────────────────────────────────────────────────────
+
+interface ConversationWithMessages {
+  _id: string
+  otherLastReadAt?: string
+  messages: ThreadMessage[]
+}
 
 interface Student {
   id: string
@@ -405,6 +413,43 @@ export default function TeacherDashboard() {
     }
   }
 
+  // Messages with the school admin (real, persisted via /api/conversations)
+  const [conversation, setConversation] = useState<ConversationWithMessages | null>(null)
+  const [messagesLoading, setMessagesLoading] = useState(false)
+  const [messageSending, setMessageSending] = useState(false)
+
+  const loadConversation = useCallback(() => {
+    setMessagesLoading(true)
+    fetch("/api/conversations")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => setConversation(data))
+      .catch(() => { })
+      .finally(() => setMessagesLoading(false))
+  }, [])
+
+  async function sendMessageToAdmin(text: string) {
+    setMessageSending(true)
+    try {
+      const url = conversation ? `/api/conversations/${conversation._id}/messages` : "/api/conversations"
+      const res = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message: text }),
+      })
+      if (!res.ok) return
+      await loadConversation()
+    } finally {
+      setMessageSending(false)
+    }
+  }
+
+  const lastMessage = conversation?.messages[conversation.messages.length - 1]
+  const messagesUnread = Boolean(
+    lastMessage &&
+    lastMessage.senderUserId !== session?.user.id &&
+    (!conversation?.otherLastReadAt || new Date(conversation.otherLastReadAt) < new Date(lastMessage.createdAt))
+  )
+
   // Discipline entry form
   const [discForm, setDiscForm] = useState({ studentId: "", type: "Merit", category: "", points: "3", note: "", date: "", actionTaken: "" })
   const [discSubmitting, setDiscSubmitting] = useState(false)
@@ -446,6 +491,18 @@ export default function TeacherDashboard() {
     if (status === "authenticated" && session?.user.role === "TEACHER") loadNotifications()
   }, [status, session?.user.role, loadNotifications])
 
+  useEffect(() => {
+    if (status === "authenticated" && session?.user.role === "TEACHER") loadConversation()
+  }, [status, session?.user.role, loadConversation])
+
+  useEffect(() => {
+    if (activeSection !== "messages" || !conversation || !messagesUnread) return
+    fetch(`/api/conversations/${conversation._id}/read`, { method: "PATCH" })
+      .then(() => setConversation((prev) => (prev ? { ...prev, otherLastReadAt: new Date().toISOString() } : prev)))
+      .catch(() => { })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeSection, conversation?._id, messagesUnread])
+
   // Default the template subject to the first one available once subjects load
   useEffect(() => {
     if (!templateSubjectId && subjects.length > 0) setTemplateSubjectId(subjects[0].id)
@@ -457,6 +514,7 @@ export default function TeacherDashboard() {
     { id: "marks", label: "Marks", icon: BookOpenIcon },
     { id: "upload", label: "Upload Marks", icon: ArrowUpTrayIcon },
     { id: "discipline", label: "Discipline", icon: ShieldExclamationIcon },
+    { id: "messages", label: "Messages", icon: ChatBubbleLeftRightIcon, badge: messagesUnread ? 1 : 0 },
     { id: "notifications", label: "Notifications", icon: BellIcon, badge: unreadNotifCount },
   ] as const
 
@@ -1403,6 +1461,26 @@ export default function TeacherDashboard() {
                     </div>
                   )}
                 </div>
+              </div>
+            )}
+
+            {/* ── Messages ── */}
+            {activeSection === "messages" && (
+              <div className="space-y-4">
+                <p className="text-sm text-gray-500">Talk with your school admin.</p>
+                {messagesLoading && !conversation ? (
+                  <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-12 text-center text-sm text-gray-400">Loading…</div>
+                ) : (
+                  <MessageThread
+                    messages={conversation?.messages ?? []}
+                    currentUserId={session!.user.id}
+                    onSend={sendMessageToAdmin}
+                    sending={messageSending}
+                    accent="indigo"
+                    placeholder="Write a message to your school admin…"
+                    emptyLabel="You haven't messaged your school admin yet. Say hello!"
+                  />
+                )}
               </div>
             )}
 

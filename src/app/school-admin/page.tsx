@@ -18,10 +18,12 @@ import {
   ExclamationTriangleIcon,
   HomeModernIcon,
   ChatBubbleLeftRightIcon,
-  EnvelopeOpenIcon,
   CheckCircleIcon,
+  PlusCircleIcon,
 } from "@heroicons/react/24/outline"
 import LanguageToggle from "@/components/LanguageToggle"
+import MessageThread, { type ThreadMessage } from "@/components/messaging/MessageThread"
+import ConversationList, { type ConversationSummary, isUnread } from "@/components/messaging/ConversationList"
 
 // ─── UI Types (flat shapes the components render) ──────────────────────────────
 
@@ -234,22 +236,23 @@ export default function SchoolAdminDashboard() {
   const [students, setStudents] = useState<Student[]>([])
   const [classes, setClasses] = useState<Class[]>([])
   const [subjects, setSubjects] = useState<Subject[]>([])
-  interface MessageItem {
-    _id: string
-    message: string
-    regarding?: string
-    status: "SENT" | "READ"
-    reply?: string
-    repliedAt?: string
-    createdAt: string
-    parentId?: { userId?: { name?: string; email?: string } }
-  }
   const [parents, setParents] = useState<Parent[]>([])
   const [parentTab, setParentTab] = useState<"PENDING" | "APPROVED">("PENDING")
-  const [messages, setMessages] = useState<MessageItem[]>([])
-  const [messagesLoading, setMessagesLoading] = useState(false)
-  const [replyText, setReplyText] = useState<Record<string, string>>({})
-  const [replySending, setReplySending] = useState<Record<string, boolean>>({})
+
+  // Messages — conversations with parents/teachers (real, persisted via /api/conversations)
+  const [conversations, setConversations] = useState<ConversationSummary[]>([])
+  const [conversationsLoading, setConversationsLoading] = useState(false)
+  const [selectedConversationId, setSelectedConversationId] = useState<string | null>(null)
+  const [selectedMessages, setSelectedMessages] = useState<ThreadMessage[]>([])
+  const [selectedMessagesLoading, setSelectedMessagesLoading] = useState(false)
+  const [messageSending, setMessageSending] = useState(false)
+  const [showComposeModal, setShowComposeModal] = useState(false)
+  const [composeRole, setComposeRole] = useState<"PARENT" | "TEACHER">("PARENT")
+  const [composeTargetId, setComposeTargetId] = useState("")
+  const [composeText, setComposeText] = useState("")
+  const [composeSending, setComposeSending] = useState(false)
+  const [composeError, setComposeError] = useState("")
+
   const [dataLoading, setDataLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
 
@@ -488,47 +491,82 @@ export default function SchoolAdminDashboard() {
     }
   }
 
-  const unreadCount = messages.filter((m) => m.status === "SENT").length
+  const unreadCount = conversations.filter(isUnread).length
 
-  const loadMessages = useCallback(async () => {
-    setMessagesLoading(true)
+  const loadConversations = useCallback(async () => {
+    setConversationsLoading(true)
     try {
-      const data = await fetchJson("/api/comments")
-      setMessages(Array.isArray(data) ? data : [])
+      const data = await fetchJson("/api/conversations")
+      setConversations(Array.isArray(data) ? data : [])
     } catch {
       // silently fail — messages are non-critical
     } finally {
-      setMessagesLoading(false)
+      setConversationsLoading(false)
     }
   }, [])
 
   useEffect(() => {
-    if (activeSection === "messages" && status === "authenticated") loadMessages()
-  }, [activeSection, status, loadMessages])
+    if (activeSection === "messages" && status === "authenticated") loadConversations()
+  }, [activeSection, status, loadConversations])
 
-  const markAsRead = async (id: string) => {
+  const selectConversation = async (id: string) => {
+    setSelectedConversationId(id)
+    setSelectedMessagesLoading(true)
     try {
-      await fetch(`/api/comments/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({}) })
-      setMessages((prev) => prev.map((m) => m._id === id ? { ...m, status: "READ" } : m))
-    } catch { /* ignore */ }
+      const data = await fetchJson(`/api/conversations/${id}/messages`)
+      setSelectedMessages(Array.isArray(data) ? data : [])
+      await fetch(`/api/conversations/${id}/read`, { method: "PATCH" })
+      setConversations((prev) => prev.map((c) => (c._id === id ? { ...c, adminLastReadAt: new Date().toISOString() } : c)))
+    } catch {
+      // ignore
+    } finally {
+      setSelectedMessagesLoading(false)
+    }
   }
 
-  const sendReply = async (id: string) => {
-    const reply = replyText[id]?.trim()
-    if (!reply) return
-    setReplySending((prev) => ({ ...prev, [id]: true }))
+  const sendMessageInSelected = async (text: string) => {
+    if (!selectedConversationId) return
+    setMessageSending(true)
     try {
-      const res = await fetch(`/api/comments/${id}`, {
-        method: "PATCH",
+      const res = await fetch(`/api/conversations/${selectedConversationId}/messages`, {
+        method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ reply }),
+        body: JSON.stringify({ message: text }),
       })
       if (!res.ok) return
-      const updated = await res.json()
-      setMessages((prev) => prev.map((m) => m._id === id ? { ...m, ...updated } : m))
-      setReplyText((prev) => ({ ...prev, [id]: "" }))
-    } catch { /* ignore */ } finally {
-      setReplySending((prev) => ({ ...prev, [id]: false }))
+      const created = await res.json()
+      setSelectedMessages((prev) => [...prev, created])
+      loadConversations()
+    } finally {
+      setMessageSending(false)
+    }
+  }
+
+  const submitCompose = async () => {
+    const text = composeText.trim()
+    if (!text || !composeTargetId) return
+    setComposeSending(true)
+    setComposeError("")
+    try {
+      const res = await fetch("/api/conversations", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message: text, toRole: composeRole, toId: composeTargetId }),
+      })
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}))
+        throw new Error(body.error || "Failed to send message")
+      }
+      const { conversation } = await res.json()
+      setShowComposeModal(false)
+      setComposeText("")
+      setComposeTargetId("")
+      await loadConversations()
+      await selectConversation(conversation._id)
+    } catch (err) {
+      setComposeError(err instanceof Error ? err.message : "Failed to send message")
+    } finally {
+      setComposeSending(false)
     }
   }
 
@@ -1222,101 +1260,57 @@ export default function SchoolAdminDashboard() {
               <div className="space-y-6">
                 <div className="flex items-center justify-between">
                   <div>
-                    <h3 className="text-2xl font-bold text-gray-900">Parent Messages</h3>
+                    <h3 className="text-2xl font-bold text-gray-900">Messages</h3>
                     {unreadCount > 0 && (
-                      <p className="text-sm text-gray-500 mt-0.5">{unreadCount} unread message{unreadCount > 1 ? "s" : ""}</p>
+                      <p className="text-sm text-gray-500 mt-0.5">{unreadCount} unread conversation{unreadCount > 1 ? "s" : ""}</p>
                     )}
                   </div>
-                  <button onClick={loadMessages} className="text-sm text-green-600 hover:underline">Refresh</button>
+                  <div className="flex items-center gap-3">
+                    <button
+                      onClick={() => { setShowComposeModal(true); setComposeError(""); setComposeTargetId("") }}
+                      className="inline-flex items-center px-3 py-1.5 text-sm font-medium text-white bg-green-600 rounded-lg hover:bg-green-700 transition-colors"
+                    >
+                      <PlusCircleIcon className="h-4 w-4 mr-1.5" />
+                      New message
+                    </button>
+                    <button onClick={loadConversations} className="text-sm text-green-600 hover:underline">Refresh</button>
+                  </div>
                 </div>
 
-                {messagesLoading ? (
+                {conversationsLoading ? (
                   <div className="flex justify-center py-16">
                     <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-green-600" />
                   </div>
-                ) : messages.length === 0 ? (
-                  <div className="bg-white rounded-xl shadow-sm border border-gray-200 text-center py-16">
-                    <ChatBubbleLeftRightIcon className="h-12 w-12 text-gray-300 mx-auto mb-3" />
-                    <p className="text-gray-500">No messages from parents yet.</p>
-                  </div>
                 ) : (
-                  <div className="space-y-3">
-                    {messages.map((msg) => {
-                      const isUnread = msg.status === "SENT"
-                      const parentName = msg.parentId?.userId?.name ?? "Unknown Parent"
-                      const parentEmail = msg.parentId?.userId?.email ?? ""
-                      return (
-                        <div
-                          key={msg._id}
-                          className={`bg-white rounded-xl border p-5 transition-colors ${
-                            isUnread ? "border-green-300 shadow-sm" : "border-gray-200"
-                          }`}
-                        >
-                          <div className="flex items-start justify-between gap-4">
-                            <div className="flex items-start space-x-3 min-w-0">
-                              <div className="h-9 w-9 rounded-full bg-purple-100 flex items-center justify-center flex-shrink-0">
-                                <span className="text-sm font-semibold text-purple-600">{parentName.charAt(0)}</span>
-                              </div>
-                              <div className="min-w-0">
-                                <div className="flex items-center gap-2 flex-wrap">
-                                  <p className="text-sm font-semibold text-gray-900">{parentName}</p>
-                                  {parentEmail && <p className="text-xs text-gray-400">{parentEmail}</p>}
-                                  {isUnread && (
-                                    <span className="text-xs font-semibold text-white bg-green-600 px-2 py-0.5 rounded-full">New</span>
-                                  )}
-                                </div>
-                                {msg.regarding && (
-                                  <p className="text-xs text-gray-500 mt-0.5">Re: {msg.regarding}</p>
-                                )}
-                                <p className="text-sm text-gray-700 mt-2 whitespace-pre-wrap">{msg.message}</p>
-                                <p className="text-xs text-gray-400 mt-2">{new Date(msg.createdAt).toLocaleString()}</p>
-                              </div>
-                            </div>
-                            {isUnread ? (
-                              <button
-                                onClick={() => markAsRead(msg._id)}
-                                className="flex-shrink-0 inline-flex items-center px-3 py-1.5 text-xs font-medium text-green-700 bg-green-50 rounded-lg hover:bg-green-100 transition-colors"
-                              >
-                                <EnvelopeOpenIcon className="h-4 w-4 mr-1" />
-                                Mark as read
-                              </button>
-                            ) : (
-                              <span className="flex-shrink-0 text-xs text-gray-400 flex items-center gap-1">
-                                <EnvelopeOpenIcon className="h-4 w-4" /> Read
-                              </span>
-                            )}
-                          </div>
-
-                          {/* Existing reply */}
-                          {msg.reply && (
-                            <div className="mt-3 ml-12 bg-green-50 border border-green-200 rounded-lg px-4 py-3">
-                              <p className="text-xs font-semibold text-green-700 mb-1">Your reply · {msg.repliedAt ? new Date(msg.repliedAt).toLocaleString() : ""}</p>
-                              <p className="text-sm text-green-900 whitespace-pre-wrap">{msg.reply}</p>
-                            </div>
-                          )}
-
-                          {/* Reply box */}
-                          {!msg.reply && (
-                            <div className="mt-3 ml-12 flex gap-2 items-end">
-                              <textarea
-                                rows={2}
-                                value={replyText[msg._id] ?? ""}
-                                onChange={(e) => setReplyText((prev) => ({ ...prev, [msg._id]: e.target.value }))}
-                                placeholder="Write a reply to this parent…"
-                                className="flex-1 text-sm rounded-lg border border-gray-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-green-500 resize-none"
-                              />
-                              <button
-                                onClick={() => sendReply(msg._id)}
-                                disabled={!replyText[msg._id]?.trim() || replySending[msg._id]}
-                                className="flex-shrink-0 px-4 py-2 text-xs font-medium text-white bg-green-600 rounded-lg hover:bg-green-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                              >
-                                {replySending[msg._id] ? "Sending…" : "Reply"}
-                              </button>
-                            </div>
-                          )}
+                  <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                    <div className="lg:col-span-1">
+                      <ConversationList
+                        conversations={conversations}
+                        selectedId={selectedConversationId ?? undefined}
+                        onSelect={selectConversation}
+                      />
+                    </div>
+                    <div className="lg:col-span-2">
+                      {selectedConversationId ? (
+                        selectedMessagesLoading ? (
+                          <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-12 text-center text-sm text-gray-400">Loading…</div>
+                        ) : (
+                          <MessageThread
+                            messages={selectedMessages}
+                            currentUserId={session!.user.id}
+                            onSend={sendMessageInSelected}
+                            sending={messageSending}
+                            accent="green"
+                            placeholder="Write a reply…"
+                          />
+                        )
+                      ) : (
+                        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-12 text-center">
+                          <ChatBubbleLeftRightIcon className="h-10 w-10 text-gray-300 mx-auto mb-3" />
+                          <p className="text-sm text-gray-500">Select a conversation, or start a new one.</p>
                         </div>
-                      )
-                    })}
+                      )}
+                    </div>
                   </div>
                 )}
               </div>
@@ -1750,6 +1744,76 @@ export default function SchoolAdminDashboard() {
             </div>
             <div className="mt-6 flex justify-end">
               <button onClick={() => setShowProfileModal(false)} className="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors">Close</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showComposeModal && (
+        <div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
+          <div className="relative top-20 mx-auto p-6 border w-11/12 md:w-[28rem] shadow-lg rounded-lg bg-white">
+            <div className="flex justify-between items-center mb-6">
+              <h3 className="text-lg font-semibold text-gray-900">New message</h3>
+              <button onClick={() => setShowComposeModal(false)} className="text-gray-400 hover:text-gray-600"><XMarkIcon className="h-6 w-6" /></button>
+            </div>
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Send to</label>
+                <div className="flex gap-2">
+                  {(["PARENT", "TEACHER"] as const).map((r) => (
+                    <button
+                      key={r}
+                      type="button"
+                      onClick={() => { setComposeRole(r); setComposeTargetId("") }}
+                      className={`flex-1 px-3 py-2 text-sm font-medium rounded-lg border transition-colors ${
+                        composeRole === r ? "bg-green-600 text-white border-green-600" : "bg-white text-gray-700 border-gray-300 hover:bg-gray-50"
+                      }`}
+                    >
+                      {r === "PARENT" ? "Parent" : "Teacher"}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  {composeRole === "PARENT" ? "Parent" : "Teacher"}
+                </label>
+                <select
+                  value={composeTargetId}
+                  onChange={(e) => setComposeTargetId(e.target.value)}
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-green-500"
+                >
+                  <option value="">Select…</option>
+                  {composeRole === "PARENT"
+                    ? parents.filter((p) => p.status === "APPROVED").map((p) => (
+                        <option key={p.id} value={p.id}>{p.name}{p.email ? ` (${p.email})` : ""}</option>
+                      ))
+                    : teachers.map((t) => (
+                        <option key={t.id} value={t.id}>{t.name}{t.email ? ` (${t.email})` : ""}</option>
+                      ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Message</label>
+                <textarea
+                  value={composeText}
+                  onChange={(e) => setComposeText(e.target.value)}
+                  rows={4}
+                  placeholder="Write your message…"
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-green-500"
+                />
+              </div>
+              {composeError && <p className="text-sm text-red-600">{composeError}</p>}
+            </div>
+            <div className="mt-6 flex justify-end gap-3">
+              <button onClick={() => setShowComposeModal(false)} className="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors">Cancel</button>
+              <button
+                onClick={submitCompose}
+                disabled={composeSending || !composeTargetId || !composeText.trim()}
+                className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {composeSending ? "Sending…" : "Send"}
+              </button>
             </div>
           </div>
         </div>

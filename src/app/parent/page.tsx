@@ -2,7 +2,7 @@
 
 import { useSession, signOut } from "next-auth/react"
 import { useRouter } from "next/navigation"
-import { useEffect, useState, useCallback, type FormEvent } from "react"
+import { useEffect, useState, useCallback } from "react"
 import {
   AcademicCapIcon,
   ArrowRightOnRectangleIcon,
@@ -19,15 +19,21 @@ import {
   BanknotesIcon,
   ChatBubbleLeftRightIcon,
   PrinterIcon,
-  PaperAirplaneIcon,
   ExclamationTriangleIcon,
   CheckCircleIcon,
   XMarkIcon,
   BellIcon,
 } from "@heroicons/react/24/outline"
 import LanguageToggle from "@/components/LanguageToggle"
+import MessageThread, { type ThreadMessage } from "@/components/messaging/MessageThread"
 
 // ─── Types ───────────────────────────────────────────────────────────────────
+
+interface ConversationWithMessages {
+  _id: string
+  otherLastReadAt?: string
+  messages: ThreadMessage[]
+}
 
 interface Child {
   id: string
@@ -324,12 +330,10 @@ export default function ParentDashboard() {
   const [dataLoading, setDataLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
 
-  // Comments (real, persisted via /api/comments)
-  interface CommentItem { _id: string; message: string; regarding?: string; status: string; reply?: string; repliedAt?: string; createdAt: string }
-  const [commentText, setCommentText] = useState("")
-  const [commentState, setCommentState] = useState<"idle" | "sending" | "sent" | "error">("idle")
-  const [commentError, setCommentError] = useState("")
-  const [myComments, setMyComments] = useState<CommentItem[]>([])
+  // Messages to school (real, persisted via /api/conversations)
+  const [conversation, setConversation] = useState<ConversationWithMessages | null>(null)
+  const [messagesLoading, setMessagesLoading] = useState(false)
+  const [messageSending, setMessageSending] = useState(false)
 
   // Notifications (real, persisted via /api/notifications)
   interface NotificationItem { _id: string; title: string; body: string; read: boolean; createdAt: string }
@@ -361,14 +365,35 @@ export default function ParentDashboard() {
     if (session.user.role !== "PARENT") { router.push("/"); return }
   }, [session, status, router])
 
-  // Load the parent's previously submitted messages
+  // Load the parent's conversation with their school
+  const loadConversation = useCallback(() => {
+    setMessagesLoading(true)
+    fetch("/api/conversations")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => setConversation(data))
+      .catch(() => { })
+      .finally(() => setMessagesLoading(false))
+  }, [])
+
   useEffect(() => {
     if (status !== "authenticated") return
-    fetch("/api/comments")
-      .then((r) => (r.ok ? r.json() : []))
-      .then((data) => setMyComments(Array.isArray(data) ? data : []))
+    loadConversation()
+  }, [status, loadConversation])
+
+  const lastMessage = conversation?.messages[conversation.messages.length - 1]
+  const messagesUnread = Boolean(
+    lastMessage &&
+    lastMessage.senderUserId !== session?.user.id &&
+    (!conversation?.otherLastReadAt || new Date(conversation.otherLastReadAt) < new Date(lastMessage.createdAt))
+  )
+
+  useEffect(() => {
+    if (activeSection !== "messages" || !conversation || !messagesUnread) return
+    fetch(`/api/conversations/${conversation._id}/read`, { method: "PATCH" })
+      .then(() => setConversation((prev) => (prev ? { ...prev, otherLastReadAt: new Date().toISOString() } : prev)))
       .catch(() => { })
-  }, [status])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeSection, conversation?._id, messagesUnread])
 
   useEffect(() => {
     if (status !== "authenticated") return
@@ -414,31 +439,20 @@ export default function ParentDashboard() {
     return () => { cancelled = true }
   }, [status, session?.user.role])
 
-  async function submitComment(e: FormEvent) {
-    e.preventDefault()
-    if (!commentText.trim()) return
-    setCommentState("sending")
-    setCommentError("")
+  async function sendMessageToSchool(text: string) {
+    setMessageSending(true)
     try {
-      const res = await fetch("/api/comments", {
+      const regarding = selectedChild ? `${selectedChild.firstName} ${selectedChild.lastName}` : undefined
+      const url = conversation ? `/api/conversations/${conversation._id}/messages` : "/api/conversations"
+      const res = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          message: commentText.trim(),
-          regarding: selectedChild ? `${selectedChild.firstName} ${selectedChild.lastName}` : undefined,
-        }),
+        body: JSON.stringify({ message: text, regarding }),
       })
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}))
-        throw new Error(body.error || "Failed to send message")
-      }
-      const created: CommentItem = await res.json()
-      setMyComments((prev) => [created, ...prev])
-      setCommentText("")
-      setCommentState("sent")
-    } catch (err) {
-      setCommentError(err instanceof Error ? err.message : "Failed to send message")
-      setCommentState("error")
+      if (!res.ok) return
+      await loadConversation()
+    } finally {
+      setMessageSending(false)
     }
   }
 
@@ -476,7 +490,7 @@ export default function ParentDashboard() {
     { id: "overview", label: "Overview", icon: ChartBarIcon },
     { id: "report", label: "Report Card", icon: BookOpenIcon },
     { id: "discipline_financial", label: "Discipline & Financial", icon: ShieldExclamationIcon },
-    { id: "messages", label: "Messages", icon: ChatBubbleLeftRightIcon },
+    { id: "messages", label: "Messages", icon: ChatBubbleLeftRightIcon, badge: messagesUnread ? 1 : 0 },
     { id: "careers", label: "Career Insights", icon: LightBulbIcon },
     { id: "notifications", label: "Notifications", icon: BellIcon, badge: unreadNotifCount },
   ] as const
@@ -1063,72 +1077,23 @@ export default function ParentDashboard() {
 
             {/* ── Messages to School ── */}
             {activeSection === "messages" && (
-              <div className="space-y-6">
-                {/* Composer */}
-                <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-                  <h4 className="text-base font-semibold text-gray-900 mb-1">Send a message to the school</h4>
-                  <p className="text-sm text-gray-500 mb-4">
-                    Share feedback, raise a concern, or ask a question about your child.
-                  </p>
-                  <form onSubmit={submitComment}>
-                    <textarea
-                      value={commentText}
-                      onChange={(e) => { setCommentText(e.target.value); if (commentState !== "idle") setCommentState("idle") }}
-                      rows={4}
-                      placeholder="Write your message…"
-                      className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-rose-500 focus:border-rose-500"
-                    />
-                    <div className="mt-3 flex items-center justify-between">
-                      <div className="text-sm">
-                        {commentState === "sent" && <span className="text-green-600">Message sent to the school ✓</span>}
-                        {commentState === "error" && <span className="text-red-600">{commentError}</span>}
-                      </div>
-                      <button
-                        type="submit"
-                        disabled={commentState === "sending" || !commentText.trim()}
-                        className="inline-flex items-center px-4 py-2 bg-rose-600 text-white text-sm font-medium rounded-lg hover:bg-rose-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                      >
-                        <PaperAirplaneIcon className="h-4 w-4 mr-2" />
-                        {commentState === "sending" ? "Sending…" : "Send Message"}
-                      </button>
-                    </div>
-                  </form>
-                </div>
-
-                {/* History */}
-                <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
-                  <div className="px-6 py-4 bg-gray-50 border-b border-gray-200">
-                    <p className="text-sm font-semibold text-gray-700">Your previous messages</p>
-                  </div>
-                  {myComments.length === 0 ? (
-                    <div className="text-center py-12">
-                      <ChatBubbleLeftRightIcon className="h-12 w-12 text-gray-300 mx-auto mb-3" />
-                      <p className="text-gray-500">You haven&apos;t sent any messages yet.</p>
-                    </div>
-                  ) : (
-                    <ul className="divide-y divide-gray-100">
-                      {myComments.map((c) => (
-                        <li key={c._id} className="px-6 py-4">
-                          <div className="flex items-start justify-between">
-                            <p className="text-sm text-gray-800 whitespace-pre-wrap">{c.message}</p>
-                            <span className={`ml-4 flex-shrink-0 text-xs font-semibold px-2 py-0.5 rounded-full ${c.status === "READ" ? "text-green-700 bg-green-100" : "text-gray-600 bg-gray-100"}`}>
-                              {c.status === "READ" ? "Read" : "Sent"}
-                            </span>
-                          </div>
-                          <div className="mt-1 flex items-center space-x-2 text-xs text-gray-400">
-                            <span>{new Date(c.createdAt).toLocaleString()}</span>
-                          </div>
-                          {c.reply && (
-                            <div className="mt-3 bg-rose-50 border border-rose-200 rounded-lg px-4 py-3">
-                              <p className="text-xs font-semibold text-rose-700 mb-1">School replied · {c.repliedAt ? new Date(c.repliedAt).toLocaleString() : ""}</p>
-                              <p className="text-sm text-rose-900 whitespace-pre-wrap">{c.reply}</p>
-                            </div>
-                          )}
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </div>
+              <div className="space-y-4">
+                <p className="text-sm text-gray-500">
+                  Talk with your child&apos;s school — share feedback, raise a concern, or ask a question.
+                </p>
+                {messagesLoading && !conversation ? (
+                  <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-12 text-center text-sm text-gray-400">Loading…</div>
+                ) : (
+                  <MessageThread
+                    messages={conversation?.messages ?? []}
+                    currentUserId={session!.user.id}
+                    onSend={sendMessageToSchool}
+                    sending={messageSending}
+                    accent="rose"
+                    placeholder="Write a message to the school…"
+                    emptyLabel="You haven't messaged the school yet. Say hello!"
+                  />
+                )}
               </div>
             )}
 
