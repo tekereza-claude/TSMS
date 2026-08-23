@@ -338,7 +338,7 @@ export default function TeacherDashboard() {
   const [profileSaving, setProfileSaving] = useState(false)
 
   useEffect(() => {
-    if (status !== "authenticated") return
+    if (status === "loading") return
     fetchJson("/api/users/me")
       .then((u) => setMyProfilePicture(u?.profilePicture || ""))
       .catch(() => {})
@@ -686,7 +686,7 @@ export default function TeacherDashboard() {
     if (fileInputRef.current) fileInputRef.current.value = ""
   }
 
-  if (status === "loading") {
+  if (status !== "authenticated") {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-indigo-600"></div>

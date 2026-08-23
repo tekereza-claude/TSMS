@@ -230,6 +230,14 @@ export default function SchoolAdminDashboard() {
   const [showProfileModal, setShowProfileModal] = useState(false)
   const [myProfilePicture, setMyProfilePicture] = useState("")
   const [profileSaving, setProfileSaving] = useState(false)
+  const [myEmail, setMyEmail] = useState("")
+  const [emailInput, setEmailInput] = useState("")
+  const [currentPasswordInput, setCurrentPasswordInput] = useState("")
+  const [newPasswordInput, setNewPasswordInput] = useState("")
+  const [confirmPasswordInput, setConfirmPasswordInput] = useState("")
+  const [accountSaving, setAccountSaving] = useState(false)
+  const [accountError, setAccountError] = useState("")
+  const [accountSuccess, setAccountSuccess] = useState("")
 
   // Data
   const [teachers, setTeachers] = useState<Teacher[]>([])
@@ -618,11 +626,15 @@ export default function SchoolAdminDashboard() {
     }
   }
 
-  // ── My profile (self-service avatar) ──
+  // ── My profile (self-service avatar, email, password) ──
   useEffect(() => {
-    if (status !== "authenticated") return
+    if (status === "loading") return
     fetchJson("/api/users/me")
-      .then((u) => setMyProfilePicture(u?.profilePicture || ""))
+      .then((u) => {
+        setMyProfilePicture(u?.profilePicture || "")
+        setMyEmail(u?.email || "")
+        setEmailInput(u?.email || "")
+      })
       .catch(() => {})
   }, [status])
 
@@ -637,6 +649,50 @@ export default function SchoolAdminDashboard() {
       if (res.ok) setMyProfilePicture(dataUrl)
     } finally {
       setProfileSaving(false)
+    }
+  }
+
+  const saveMyAccount = async () => {
+    setAccountError("")
+    setAccountSuccess("")
+
+    const emailChanged = emailInput.trim().toLowerCase() !== myEmail.toLowerCase()
+    const wantsPasswordChange = Boolean(newPasswordInput)
+
+    if (!emailChanged && !wantsPasswordChange) return
+    if (wantsPasswordChange && newPasswordInput !== confirmPasswordInput) {
+      setAccountError("New passwords do not match")
+      return
+    }
+    if (!currentPasswordInput) {
+      setAccountError("Enter your current password to confirm this change")
+      return
+    }
+
+    setAccountSaving(true)
+    try {
+      const res = await fetch("/api/users/me", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          currentPassword: currentPasswordInput,
+          ...(emailChanged ? { email: emailInput.trim() } : {}),
+          ...(wantsPasswordChange ? { newPassword: newPasswordInput } : {}),
+        }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(data.error || "Failed to update account")
+
+      setMyEmail(data.email)
+      setEmailInput(data.email)
+      setCurrentPasswordInput("")
+      setNewPasswordInput("")
+      setConfirmPasswordInput("")
+      setAccountSuccess("Account updated")
+    } catch (e) {
+      setAccountError(e instanceof Error ? e.message : "Failed to update account")
+    } finally {
+      setAccountSaving(false)
     }
   }
 
@@ -662,7 +718,7 @@ export default function SchoolAdminDashboard() {
     .filter((p) => p.name.toLowerCase().includes(q) || p.email.toLowerCase().includes(q))
   const pendingParentCount = parents.filter((p) => p.status === "PENDING").length
 
-  if (status === "loading") {
+  if (status !== "authenticated") {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-green-600"></div>
@@ -690,7 +746,15 @@ export default function SchoolAdminDashboard() {
             <div className="flex items-center space-x-3">
               <LanguageToggle />
               <button
-                onClick={() => setShowProfileModal(true)}
+                onClick={() => {
+                  setShowProfileModal(true)
+                  setEmailInput(myEmail)
+                  setCurrentPasswordInput("")
+                  setNewPasswordInput("")
+                  setConfirmPasswordInput("")
+                  setAccountError("")
+                  setAccountSuccess("")
+                }}
                 title="My Profile"
                 className="h-10 w-10 rounded-full bg-green-600 bg-cover bg-center flex items-center justify-center overflow-hidden hover:ring-2 hover:ring-green-300 transition-shadow"
                 style={myProfilePicture ? { backgroundImage: `url(${myProfilePicture})` } : undefined}
@@ -1714,7 +1778,7 @@ export default function SchoolAdminDashboard() {
       {/* ── My Profile Modal ── */}
       {showProfileModal && (
         <div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
-          <div className="relative top-20 mx-auto p-6 border w-11/12 md:w-96 shadow-lg rounded-lg bg-white">
+          <div className="relative top-20 mx-auto p-6 border w-11/12 md:w-[26rem] shadow-lg rounded-lg bg-white">
             <div className="flex justify-between items-center mb-6">
               <h3 className="text-lg font-semibold text-gray-900">My Profile</h3>
               <button onClick={() => setShowProfileModal(false)} className="text-gray-400 hover:text-gray-600"><XMarkIcon className="h-6 w-6" /></button>
@@ -1742,6 +1806,60 @@ export default function SchoolAdminDashboard() {
                 )}
               </div>
             </div>
+
+            <div className="mt-6 pt-6 border-t border-gray-200 space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
+                <input
+                  type="email"
+                  value={emailInput}
+                  onChange={(e) => setEmailInput(e.target.value)}
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-green-500"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">New password <span className="text-gray-400 font-normal">(leave blank to keep current)</span></label>
+                <input
+                  type="password"
+                  value={newPasswordInput}
+                  onChange={(e) => setNewPasswordInput(e.target.value)}
+                  placeholder="At least 8 characters"
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-green-500"
+                />
+              </div>
+              {newPasswordInput && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Confirm new password</label>
+                  <input
+                    type="password"
+                    value={confirmPasswordInput}
+                    onChange={(e) => setConfirmPasswordInput(e.target.value)}
+                    className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-green-500"
+                  />
+                </div>
+              )}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Current password <span className="text-gray-400 font-normal">(required to change email or password)</span></label>
+                <input
+                  type="password"
+                  value={currentPasswordInput}
+                  onChange={(e) => setCurrentPasswordInput(e.target.value)}
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-green-500"
+                />
+              </div>
+              {accountError && <p className="text-sm text-red-600">{accountError}</p>}
+              {accountSuccess && <p className="text-sm text-green-600">{accountSuccess}</p>}
+              <div className="flex justify-end">
+                <button
+                  onClick={saveMyAccount}
+                  disabled={accountSaving || (emailInput.trim().toLowerCase() === myEmail.toLowerCase() && !newPasswordInput)}
+                  className="px-4 py-2 bg-green-600 text-white text-sm rounded-lg hover:bg-green-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {accountSaving ? "Saving…" : "Save account changes"}
+                </button>
+              </div>
+            </div>
+
             <div className="mt-6 flex justify-end">
               <button onClick={() => setShowProfileModal(false)} className="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors">Close</button>
             </div>
