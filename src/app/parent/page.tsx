@@ -482,7 +482,8 @@ export default function ParentDashboard() {
 
   // Career recommendations — based on all-term data
   const careerRecs = computeCareerRecommendations(allMarks, careerClusters)
-  const hasEnoughData = allMarks.length >= 3
+  const MIN_MARKS_FOR_CAREER_INSIGHTS = 3
+  const hasEnoughData = allMarks.length >= MIN_MARKS_FOR_CAREER_INSIGHTS
 
   // Best and weakest subject this term
   const sorted = [...termMarks].sort((a, b) => (b.score / b.maxScore) - (a.score / a.maxScore))
@@ -1154,8 +1155,9 @@ export default function ParentDashboard() {
                     <LightBulbIcon className="h-14 w-14 text-gray-300 mx-auto mb-4" />
                     <h4 className="text-lg font-semibold text-gray-700 mb-2">Not enough data yet</h4>
                     <p className="text-sm text-gray-500 max-w-md mx-auto">
-                      Career insights will appear once your child has marks recorded across multiple subjects.
-                      Check back after the teacher uploads results.
+                      {selectedChild?.firstName ?? "Your child"} has {allMarks.length} mark{allMarks.length === 1 ? "" : "s"} recorded so far —
+                      career insights need at least {MIN_MARKS_FOR_CAREER_INSIGHTS} across one or more subjects before a pattern is reliable.
+                      Check back after the teacher uploads more results.
                     </p>
                   </div>
                 ) : (
@@ -1208,7 +1210,7 @@ export default function ParentDashboard() {
                     {/* Career recommendation cards */}
                     {careerRecs.length === 0 ? (
                       <div className="bg-white rounded-xl shadow p-8 text-center">
-                        <p className="text-gray-500 text-sm">No strong career matches found yet. Encourage your child to keep improving across subjects.</p>
+                        <p className="text-gray-500 text-sm">No strong career matches yet — {selectedChild?.firstName ?? "your child"}&apos;s current subject scores haven&apos;t crossed the threshold for any career path. Keep an eye on this as more terms and subjects are recorded.</p>
                       </div>
                     ) : (
                       <>
