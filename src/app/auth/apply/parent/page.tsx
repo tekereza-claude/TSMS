@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import Link from "next/link"
 import { useLanguage } from "@/lib/i18n/LanguageContext"
 import LanguageToggle from "@/components/LanguageToggle"
@@ -34,6 +34,18 @@ export default function ApplyParent() {
   const [error, setError] = useState("")
   const [submitted, setSubmitted] = useState(false)
 
+  // Toast — pops up when a selected school turns out to have no unlinked students
+  const [toast, setToast] = useState<string | null>(null)
+  const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const showToast = (message: string) => {
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current)
+    setToast(message)
+    toastTimerRef.current = setTimeout(() => setToast(null), 5000)
+  }
+
+  useEffect(() => () => { if (toastTimerRef.current) clearTimeout(toastTimerRef.current) }, [])
+
   useEffect(() => {
     fetch("/api/schools/public")
       .then((res) => res.json())
@@ -43,6 +55,7 @@ export default function ApplyParent() {
 
   useEffect(() => {
     setSelectedStudentIds([])
+    setToast(null)
     if (!form.schoolId) {
       setStudents([])
       return
@@ -50,9 +63,14 @@ export default function ApplyParent() {
     setStudentsLoading(true)
     fetch(`/api/students/public?schoolId=${form.schoolId}`)
       .then((res) => res.json())
-      .then((data: StudentOption[]) => setStudents(Array.isArray(data) ? data : []))
+      .then((data: StudentOption[]) => {
+        const list = Array.isArray(data) ? data : []
+        setStudents(list)
+        if (list.length === 0) showToast(t.noStudentsAvailable)
+      })
       .catch(() => setStudents([]))
       .finally(() => setStudentsLoading(false))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [form.schoolId])
 
   const update = (key: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
@@ -196,6 +214,24 @@ export default function ApplyParent() {
           </form>
         )}
       </div>
+
+      {toast && (
+        <div
+          role="status"
+          aria-live="polite"
+          className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 w-[calc(100%-2rem)] max-w-sm rounded-lg bg-gray-900 text-white text-sm px-4 py-3 shadow-lg flex items-start gap-3"
+        >
+          <span className="flex-1">{toast}</span>
+          <button
+            type="button"
+            onClick={() => setToast(null)}
+            className="flex-shrink-0 text-gray-300 hover:text-white"
+            aria-label={t.close}
+          >
+            ✕
+          </button>
+        </div>
+      )}
     </div>
   )
 }
